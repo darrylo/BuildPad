@@ -94,7 +94,19 @@ public:
     struct ArcDPSGearTemplate : ArcDPSLegendaryTemplate<T>
     {
         std::array<char, AG_NAME_LEN> Character;
-        std::array<uint8_t, 4> SlotVisible;
+        std::array<uint8_t, 4> SlotHidden;
+
+        [[nodiscard]] std::optional<bool> GetSlotVisibility(GW2::Slot slot) const
+        {
+            switch (slot)
+            {
+                case GW2::Slot::Helm:       return !SlotHidden[0];
+                case GW2::Slot::Shoulders:  return !SlotHidden[1];
+                case GW2::Slot::Gloves:     return !SlotHidden[2];
+                case GW2::Slot::Back:       return !SlotHidden[3];
+                default: return { };
+            }
+        }
     };
     struct BuildTemplate
     {
@@ -111,6 +123,9 @@ public:
         {
             T Land { };
             T Water { };
+
+            T      & Select(bool water)       { return water ? Water : Land; }
+            T const& Select(bool water) const { return water ? Water : Land; }
         };
 
         uint8_t Type = 0x0D;
@@ -121,7 +136,11 @@ public:
         {
             std::array<uint8_t, 16> Raw { };
             LandWaterData<std::array<uint8_t, 2>> RangerPets;
-            LandWaterData<std::array<GW2::RevenantLegend, 2>> RevenantLegends;
+            struct
+            {
+                LandWaterData<std::array<GW2::RevenantLegend, 2>> Legends;
+                LandWaterData<std::array<uint16_t, 3>> InactiveSkills { };
+            } Revenant;
         } ProfessionSpecific { };
 
         BuildTemplate() = default;
@@ -147,7 +166,7 @@ public:
                     ProfessionSpecific.RangerPets = { };
                     break;
                 case GW2::Profession::Revenant:
-                    ProfessionSpecific.RevenantLegends = { };
+                    ProfessionSpecific.Revenant = { };
                     break;
                 default:
                     ProfessionSpecific.Raw = { };
@@ -161,6 +180,5 @@ public:
     static std::string Encode(unsigned char const* data, size_t length);
     static std::string Encode(link_t const& link);
     static std::optional<link_t> Decode(std::string_view code);
-
 };
 }

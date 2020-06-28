@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "Defines.h"
 #include "GW2.h"
+#include "KeyBind.h"
 
 namespace buildpad
 {
@@ -24,30 +25,46 @@ public:
         Tank        = BITMASK(10),
         Support     = BITMASK(11),
         Heal        = BITMASK(12),
+        Control     = BITMASK(13),
+        Conquest    = BITMASK(14),
+        Stronghold  = BITMASK(15),
+        Duos        = BITMASK(16),
+        Zerg        = BITMASK(17),
+        Havoc       = BITMASK(18),
+        Roaming     = BITMASK(19),
     };
+    DEFINE_BITMASK_OPERATORS(Flags)
     struct FlagInfo
     {
         Flags Flag;
         std::string Name;
+        bool VisibleByDefault;
         bool Separator = false;
     };
     static std::vector<FlagInfo> const& GetFlagInfos()
     {
         static std::vector<FlagInfo> const instance
         {
-            { Flags::Favorite,  "Favorite",        },
-            { Flags::PvE,       "PvE",        true },
-            { Flags::PvP,       "PvP",             },
-            { Flags::WvW,       "WvW",             },
-            { Flags::OpenWorld, "Open World", true },
-            { Flags::Dungeons,  "Dungeons",        },
-            { Flags::Fractals,  "Fractals",        },
-            { Flags::Raids,     "Raids",           },
-            { Flags::Power,     "Power",      true },
-            { Flags::Condition, "Condition",       },
-            { Flags::Tank,      "Tank",            },
-            { Flags::Support,   "Support",         },
-            { Flags::Heal,      "Heal",            },
+            { Flags::Favorite,      "Favorite",     true,        },
+            { Flags::PvE,           "PvE",          true,   true },
+            { Flags::PvP,           "PvP",          true,        },
+            { Flags::WvW,           "WvW",          true,        },
+            { Flags::OpenWorld,     "Open World",   true,   true },
+            { Flags::Dungeons,      "Dungeons",     true,        },
+            { Flags::Fractals,      "Fractals",     true,        },
+            { Flags::Raids,         "Raids",        true,        },
+            { Flags::Conquest,      "Conquest",     false,  true },
+            { Flags::Stronghold,    "Stronghold",   false,       },
+            { Flags::Duos,          "Duos",         false,       },
+            { Flags::Zerg,          "Zerg",         false,  true },
+            { Flags::Havoc,         "Havoc",        false,       },
+            { Flags::Roaming,       "Roaming",      false,       },
+            { Flags::Power,         "Power",        true,   true },
+            { Flags::Condition,     "Condition",    true,        },
+            { Flags::Tank,          "Tank",         true,        },
+            { Flags::Control,       "Control",      false,       },
+            { Flags::Support,       "Support",      true,        },
+            { Flags::Heal,          "Heal",         true,        },
         };
         return instance;
     }
@@ -66,6 +83,8 @@ public:
         std::optional<std::array<TraitLine, 3>> TraitLines;
         std::array<GW2::RevenantLegend, 2> RevenantLegendsLand { GW2::RevenantLegend::None, GW2::RevenantLegend::None };
         std::array<GW2::RevenantLegend, 2> RevenantLegendsWater { GW2::RevenantLegend::None, GW2::RevenantLegend::None };
+        std::array<uint32_t, 3> RevenantInactiveSkillsLand { 0, 0, 0 };
+        std::array<uint32_t, 3> RevenantInactiveSkillsWater { 0, 0, 0 };
         std::array<uint8_t, 2> RangerPetsLand { 0, 0 };
         std::array<uint8_t, 2> RangerPetsWater { 0, 0 };
         std::string Error;
@@ -81,7 +100,10 @@ public:
     [[nodiscard]] std::string_view GetLink() const { return m_link; }
     [[nodiscard]] std::string_view GetSecondaryLink() const { return m_secondaryLink; }
     [[nodiscard]] Flags GetFlags() const { return m_flags; }
-    [[nodiscard]] bool HasFlag(Flags flag) const { return ((std::underlying_type_t<Flags>)m_flags & (std::underlying_type_t<Flags>)flag) != 0; }
+    [[nodiscard]] bool HasFlag(Flags flag) const { return (m_flags & flag) != Flags::None; }
+    [[nodiscard]] Flags GetFlagIcons() const { return m_flagIcons; }
+    [[nodiscard]] bool HasFlagIcon(Flags flag) const { return (m_flagIcons & flag) != Flags::None; }
+    [[nodiscard]] KeyBind const& GetKeyBind() const { return m_keyBind; }
     [[nodiscard]] std::string_view GetNormalizedName() const { return m_normalizedName; }
     [[nodiscard]] ParsedInfo const& GetParsedInfo() const { return m_parsedInfo; }
 
@@ -98,13 +120,13 @@ public:
         std::transform(m_normalizedName.begin(), m_normalizedName.end(), m_normalizedName.begin(), toupper);
         m_needsSave = true;
     }
-    void SetLink(std::string_view link)
+    void SetLink(std::string_view link, std::optional<uint32_t> const buildVersion = { })
     {
         if (m_link == link)
             return;
 
         m_link = link;
-        m_parsedInfo = ParseInfo(m_link);
+        m_parsedInfo = ParseInfo(m_link, buildVersion);
         m_needsSave = true;
 
         HandleMigration();
@@ -131,14 +153,33 @@ public:
         if (HasFlag(flag) == on)
             return;
 
-        m_flags = (Flags)(on
-            ? (std::underlying_type_t<Flags>)m_flags |  (std::underlying_type_t<Flags>)flag
-            : (std::underlying_type_t<Flags>)m_flags & ~(std::underlying_type_t<Flags>)flag);
+        if (on) m_flags |=  flag;
+        else    m_flags &= ~flag;
+        m_needsSave = true;
+    }
+    void ToggleFlagIcon(Flags flag, bool on)
+    {
+        if (HasFlagIcon(flag) == on)
+            return;
+
+        if (on) m_flagIcons |=  flag;
+        else    m_flagIcons &= ~flag;
+        m_needsSave = true;
+    }
+    void SetKeyBind(std::string_view keyBind) { SetKeyBind(KeyBind { keyBind }); }
+    void SetKeyBind(KeyBind const keyBind)
+    {
+        if (m_keyBind == keyBind)
+            return;
+
+        m_keyBind = keyBind;
         m_needsSave = true;
     }
 
     [[nodiscard]] bool IsSaveNeeded() const { return m_needsSave; }
     void SetSaved() { m_needsSave = false; }
+
+    void PostLoad(uint32_t buildVersion);
 
 private:
     id_t m_id;
@@ -146,11 +187,14 @@ private:
     std::string m_link;
     std::string m_secondaryLink;
     Flags m_flags = Flags::None;
+    Flags m_flagIcons = Flags::None;
+    KeyBind m_keyBind;
     ParsedInfo m_parsedInfo;
     std::string m_normalizedName;
     bool m_needsSave = false;
 
-    static ParsedInfo ParseInfo(std::string_view code);
+    static ParsedInfo ParseInfo(std::string_view code, std::optional<uint32_t> buildVersion = { });
+    static std::optional<std::string> ValidateParsedInfo(ParsedInfo& parsed);
     void HandleMigration();
 };
 }

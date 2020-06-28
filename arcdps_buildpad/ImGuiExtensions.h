@@ -1,5 +1,6 @@
 #pragma once
 #include "Common.h"
+#include "Handler.h"
 #include "imgui/imgui_internal.h"
 
 namespace ImGui
@@ -14,7 +15,9 @@ bool ImageButtonWithText(ImTextureID texId,
                          int frame_padding = 0, // -1
                          ImVec4 const& bg_col = { 0, 0, 0, 0 },
                          ImVec4 const& tint_col = { 1, 1, 1, 1 },
-                         bool borders = false)
+                         bool borders = false,
+                         char const* rightSideLabel = nullptr,
+                         std::vector<buildpad::TextureData const*> additionalImages = { })
 {
     ImGuiWindow* window = GetCurrentWindow();
     if (window->SkipItems)
@@ -51,9 +54,9 @@ bool ImageButtonWithText(ImTextureID texId,
         start.y += (buttonSize.y - size.y) * .5f;
     else if (size.y < textSize.y)
         start.y += (textSize.y - size.y) * .5f;
-    ImRect const image_bb(ImFloor(start), ImFloor(start + size));
+    ImRect image_bb(ImFloor(start), ImFloor(start + size));
     start = window->DC.CursorPos + padding;
-    start.x += size.x + innerSpacing;
+    start.x += size.x * (1 + additionalImages.size()) + innerSpacing;
     if (size.y > textSize.y)
         start.y += (size.y - textSize.y) * .5f;
     ItemSize(bb);
@@ -82,10 +85,28 @@ bool ImageButtonWithText(ImTextureID texId,
         window->DrawList->AddRectFilled(image_bb.Min, image_bb.Max, GetColorU32(bg_col));
 
     window->DrawList->AddImage(texId, image_bb.Min, image_bb.Max, uv0, uv1, GetColorU32(tint_col));
+    for (auto const& image : additionalImages)
+    {
+        image_bb.Min.x = std::exchange(image_bb.Max.x, image_bb.Max.x + image_bb.Max.x - image_bb.Min.x);
+        window->DrawList->AddImage(image->Texture, image_bb.Min, image_bb.Max, image->GetUV0(), image->GetUV1(), GetColorU32(tint_col));
+    }
 
     if (textSize.x > 0)
     {
         ImRect clip { bb.Min, bb.Max };
+        if (rightSideLabel)
+        {
+            size = CalcTextSize(rightSideLabel);
+            ImRect const rbb { { std::max<float>(start.x, bb.Max.x - style.ItemInnerSpacing.x - size.x - style.ItemInnerSpacing.x), bb.Min.y }, bb.Max };
+            ImVec4 color = ColorConvertU32ToFloat4(GetColorU32(ImGuiCol_Text));
+            color.w /= 2;
+            PushStyleColor(ImGuiCol_Text, color);
+            RenderTextClipped({ rbb.Min.x + style.ItemInnerSpacing.x, rbb.Min.y + (rbb.GetHeight() - size.y) / 2 }, rbb.Max, rightSideLabel, nullptr, &size, { 0, 0 }, &rbb);
+            PopStyleColor();
+
+            clip.Max.x = rbb.Min.x;
+        }
+
         RenderTextClipped(start, bb.Max, label, nullptr, &textSize, { 0, 0 }, &clip);
     }
 
@@ -195,7 +216,9 @@ bool CheckboxImage(ImTextureID texId,
     if (pressed)
         *v = !(*v);
 
-    auto const floatToVec = [](float v) { return ImVec4 { v, v, v, v }; };
+    float a = buildpad::Handler::Instance().IsLessTransparentButtonsEnabled() ? ColorConvertU32ToFloat4(GetColorU32(ImGuiCol_WindowBg)).w / 0.75f : 1.0f;
+
+    auto const floatToVec = [a](float v) { return ImVec4 { v, v, v, util::lerp(1.0f, v, std::clamp(a, 0.0f, 1.0f)) }; };
 
     window->DrawList->AddImage(texId, check_bb.Min, check_bb.Max, uv0, uv1, GetColorU32(held && hovered
         ? floatToVec(*v ? opacity_on_active : opacity_off_active)
@@ -370,9 +393,74 @@ bool Hyperlink(char const* text, wchar_t const* url)
     return false;
 }
 
+template<typename... T>
+void Tooltip(char const* text, T&&... args)
+{
+    BeginTooltip();
+    SetWindowFontScale(buildpad::Handler::Instance().GetUIScale());
+    Text("%s", fmt::format(text, args...).c_str());
+    EndTooltip();
+}
+
+template<typename... T>
+void TooltipWithHeader(char const* header, char const* sub, T&&... args)
+{
+    BeginTooltip();
+    SetWindowFontScale(buildpad::Handler::Instance().GetUIScale());
+    if (header)
+        Text("%s", fmt::format(header, args...).c_str());
+    if (sub)
+    {
+        auto* window = GetCurrentWindow();
+        PushTextWrapPos(std::max<float>(window->DC.CursorMaxPos.x - (window->Pos.x + window->DC.IndentX + window->DC.ColumnsOffsetX), 200.0f * window->FontWindowScale));
+        ImVec4 color = ColorConvertU32ToFloat4(GetColorU32(ImGuiCol_Text));
+        color.w /= 2;
+        TextColored(color, "%s", fmt::format(sub, args...).c_str());
+        PopTextWrapPos();
+    }
+    EndTooltip();
+}
+
 bool IsPopupOpenPublic(char const* str_id)
 {
     ImGuiContext& g = *GImGui;
     return g.OpenPopupStack.Size > g.CurrentPopupStack.Size && g.OpenPopupStack[g.CurrentPopupStack.Size].PopupId == g.CurrentWindow->GetID(str_id);
+}
+
+static struct
+{
+    ImVec2 CursorPosPrevLine;
+    ImVec2 CursorPos;
+    ImVec2 CursorMaxPos;
+    float PrevLineHeight;
+    float PrevLineTextBaseOffset;
+    float CurrentLineHeight;
+    float CurrentLineTextBaseOffset;
+} storedCursor;
+
+ImVec2 StoreCursor()
+{
+    ImGuiWindow* window = GetCurrentWindow();
+    storedCursor.CursorPosPrevLine = window->DC.CursorPosPrevLine;
+    storedCursor.CursorPos = window->DC.CursorPos;
+    storedCursor.CursorMaxPos = window->DC.CursorMaxPos;
+    storedCursor.PrevLineHeight = window->DC.PrevLineHeight;
+    storedCursor.PrevLineTextBaseOffset = window->DC.PrevLineTextBaseOffset;
+    storedCursor.CurrentLineHeight = window->DC.CurrentLineHeight;
+    storedCursor.CurrentLineTextBaseOffset = window->DC.CurrentLineTextBaseOffset;
+    return GetCursorPos();
+}
+
+ImVec2 RestoreCursor()
+{
+    ImGuiWindow* window = GetCurrentWindow();
+    window->DC.CursorPosPrevLine = storedCursor.CursorPosPrevLine;
+    window->DC.CursorPos = storedCursor.CursorPos;
+    window->DC.CursorMaxPos = storedCursor.CursorMaxPos;
+    window->DC.PrevLineHeight = storedCursor.PrevLineHeight;
+    window->DC.PrevLineTextBaseOffset = storedCursor.PrevLineTextBaseOffset;
+    window->DC.CurrentLineHeight = storedCursor.CurrentLineHeight;
+    window->DC.CurrentLineTextBaseOffset = storedCursor.CurrentLineTextBaseOffset;
+    return GetCursorPos();
 }
 }

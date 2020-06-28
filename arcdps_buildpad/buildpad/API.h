@@ -10,6 +10,9 @@ class Build;
 
 class API : public Singleton<API>
 {
+    template<typename T>
+    struct InfoHandlers;
+
 public:
     template<typename T>
     struct Info
@@ -21,6 +24,17 @@ public:
 
         static T& Get(uint32_t const id) { return Instance().Get<T>(id); }
         operator bool() const { return Loaded; }
+
+        static TextureData GetDefaultIcon() { return InfoHandlers<T>::GetDefaultIcons()[0]; }
+        static TextureData GetErrorIcon() { return InfoHandlers<T>::GetDefaultIcons()[1]; }
+    };
+    struct Profession : Info<Profession>
+    {
+        using Info::Info;
+        std::string Name;
+        std::vector<GW2::Specialization> Specializations;
+        std::vector<uint32_t> Skills;
+        TextureData Icon = GetDefaultIcon();
     };
     struct Specialization : Info<Specialization>
     {
@@ -30,7 +44,8 @@ public:
         std::array<uint32_t, 9> MajorTraits { };
         uint32_t WeaponTrait = 0;
         std::string IconURL;
-        std::optional<TextureData> Icon;
+        bool IconLoaded = false;
+        TextureData Icon = GetDefaultIcon();
 
         [[nodiscard]] uint16_t GetTrait(uint8_t rank, uint8_t order) const
         {
@@ -46,7 +61,7 @@ public:
         using Info::Info;
         std::string Name;
         bool Major = false;
-        TextureData Icon = Handler::Instance().GetIcon(Handler::Icons::LoadingTrait);
+        TextureData Icon = GetDefaultIcon();
 
         [[nodiscard]] std::string ToChatLink() const
         {
@@ -58,7 +73,8 @@ public:
     {
         using Info::Info;
         std::string Name;
-        TextureData Icon = Handler::Instance().GetIcon(Handler::Icons::LoadingSkill);
+        bool NoUnderwater = false;
+        TextureData Icon = GetDefaultIcon();
 
         [[nodiscard]] std::string ToChatLink() const
         {
@@ -71,7 +87,7 @@ public:
         using Info::Info;
         std::string Name = "...";
         GW2::Rarity Rarity = GW2::Rarity::Junk;
-        TextureData Icon = Handler::Instance().GetIcon(Handler::Icons::LoadingItem);
+        TextureData Icon = GetDefaultIcon();
 
         [[nodiscard]] std::string ToChatLink() const
         {
@@ -88,7 +104,7 @@ public:
     {
         using Info::Info;
         std::string Name;
-        TextureData Icon = Handler::Instance().GetIcon(Handler::Icons::LoadingPet);
+        TextureData Icon = GetDefaultIcon();
     };
 
     struct LanguageInfo
@@ -115,15 +131,27 @@ public:
             return;
 
         m_lang = lang;
-        m_specializations.clear();
-        m_traits.clear();
-        m_skills.clear();
-        m_items.clear();
-        m_itemStats.clear();
-        m_pets.clear();
+        Unload();
     }
 
+    void Unload()
+    {
+        ++m_generation;
+        UnloadContainer<Profession>(&Profession::Icon);
+        UnloadContainer<Specialization>(&Specialization::Icon);
+        UnloadContainer<Trait>(&Trait::Icon);
+        UnloadContainer<Skill>(&Skill::Icon);
+        UnloadContainer<Item>(&Item::Icon);
+        UnloadContainer<ItemStats>();
+        UnloadContainer<Pet>(&Pet::Icon);
+        m_professionsRequested = false;
+    }
+
+    void LoadSkillData() const;
     void PreloadAllPets();
+    void PreloadAllProfessions();
+    void PreloadAllProfessionSkills(GW2::Profession profession);
+    void PreloadAllProfessionSpecializations(GW2::Profession profession);
     bool PreloadAllBuildInfos(Build const& build);
     bool PreloadAllGearInfos(ChatLink::ArcDPSLegendaryTemplate<uint32_t> const& gear);
 
@@ -134,14 +162,28 @@ private:
     struct InfoHandlers;
 
     std::string m_lang;
-    std::string m_schema = "2019-05-22T00:00:00.000Z";
+    std::string m_schema = "2019-12-19T00:00:00.000Z";
 
+    bool m_professionsRequested = false;
+    uint32_t m_generation = 0;
+    InfoContainer<Profession> m_professions;
     InfoContainer<Specialization> m_specializations;
     InfoContainer<Trait> m_traits;
     InfoContainer<Skill> m_skills;
     InfoContainer<Item> m_items;
     InfoContainer<ItemStats> m_itemStats;
     InfoContainer<Pet> m_pets;
+
+    template<typename T>
+    void UnloadContainer() { GetInfoContainer<T>().clear(); }
+    template<typename T>
+    void UnloadContainer(TextureData T::*icon)
+    {
+        for (auto&& [id, info] : GetInfoContainer<T>())
+            if (TextureData& texture = info.*icon; !util::find_if(InfoHandlers<T>::GetDefaultIcons(), util::member_equals(&TextureData::Texture, texture.Texture)))
+                Handler::Instance().UnloadTexture(info.*icon);
+        UnloadContainer<T>();
+    }
 
     template<typename T>
     [[nodiscard]] bool Has(uint32_t id) const { return GetInfoContainer<T>().find(id) != GetInfoContainer<T>().end(); }
@@ -168,12 +210,13 @@ private:
             return;
 
         Web::Instance().Request(
-            fmt::format(InfoHandlers<T>::URL, fmt::join(std::begin(ids), std::end(ids), ","), m_lang, m_schema),
-            &InfoHandlers<T>::Success,
-            [ids](auto&&) { InfoHandlers<T>::Error(ids); });
+            fmt::format(InfoHandlers<T>::URL, m_lang, m_schema, fmt::join(std::begin(ids), std::end(ids), ",")),
+            [this, generation = m_generation](std::string_view data) { if (generation == m_generation) InfoHandlers<T>::Success(data); },
+            [this, generation = m_generation, ids](auto&&)           { if (generation == m_generation) InfoHandlers<T>::Error(ids); });
     }
 };
 
+template<> [[nodiscard]] inline auto API::GetInfoContainer() const -> InfoContainer<Profession>       const& { return m_professions; }
 template<> [[nodiscard]] inline auto API::GetInfoContainer() const -> InfoContainer<Specialization>   const& { return m_specializations; }
 template<> [[nodiscard]] inline auto API::GetInfoContainer() const -> InfoContainer<Trait>            const& { return m_traits; }
 template<> [[nodiscard]] inline auto API::GetInfoContainer() const -> InfoContainer<Skill>            const& { return m_skills; }
@@ -181,10 +224,11 @@ template<> [[nodiscard]] inline auto API::GetInfoContainer() const -> InfoContai
 template<> [[nodiscard]] inline auto API::GetInfoContainer() const -> InfoContainer<ItemStats>        const& { return m_itemStats; }
 template<> [[nodiscard]] inline auto API::GetInfoContainer() const -> InfoContainer<Pet>              const& { return m_pets; }
 
-template<> struct API::InfoHandlers<API::Specialization>    { static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/specializations?ids={}&lang={}&v={}"; };
-template<> struct API::InfoHandlers<API::Trait>             { static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/traits?ids={}&lang={}&v={}"; };
-template<> struct API::InfoHandlers<API::Skill>             { static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/skills?ids={}&lang={}&v={}"; };
-template<> struct API::InfoHandlers<API::Item>              { static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/items?ids={}&lang={}&v={}"; };
-template<> struct API::InfoHandlers<API::ItemStats>         { static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/itemstats?ids={}&lang={}&v={}"; };
-template<> struct API::InfoHandlers<API::Pet>               { static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/pets?ids={}&lang={}&v={}"; };
+template<> struct API::InfoHandlers<API::Profession>        { static std::array<TextureData, 1> GetDefaultIcons(); static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/professions?lang={}&v={}&ids=all"; };
+template<> struct API::InfoHandlers<API::Specialization>    { static std::array<TextureData, 2> GetDefaultIcons(); static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/specializations?lang={}&v={}&ids={}"; };
+template<> struct API::InfoHandlers<API::Trait>             { static std::array<TextureData, 4> GetDefaultIcons(); static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/traits?lang={}&v={}&ids={}"; };
+template<> struct API::InfoHandlers<API::Skill>             { static std::array<TextureData, 2> GetDefaultIcons(); static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/skills?lang={}&v={}&ids={}"; };
+template<> struct API::InfoHandlers<API::Item>              { static std::array<TextureData, 2> GetDefaultIcons(); static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/items?lang={}&v={}&ids={}"; };
+template<> struct API::InfoHandlers<API::ItemStats>         {                                                      static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/itemstats?lang={}&v={}&ids={}"; };
+template<> struct API::InfoHandlers<API::Pet>               { static std::array<TextureData, 2> GetDefaultIcons(); static void Success(std::string_view data); static void Error(std::set<uint32_t> const& ids); inline static char const* URL = "https://api.guildwars2.com/v2/pets?lang={}&v={}&ids={}"; };
 }

@@ -1,5 +1,6 @@
 ﻿#include "Handler.h"
 #include "BuildStorage.h"
+#include "SkillStorage.h"
 #include "ChatLink.h"
 #include "API.h"
 #include "Web.h"
@@ -15,11 +16,14 @@
 
 namespace buildpad
 {
-char const* const BUILDPAD_VERSION = "2019-10-31";
+char const* const BUILDPAD_VERSION = "2020-06-11";
 
 namespace resources
 {
+#include "resources/102584.h"
 #include "resources/155143.h"
+#include "resources/155919.h"
+#include "resources/155923.h"
 #include "resources/156058.h"
 #include "resources/156293.h"
 #include "resources/156297.h"
@@ -48,7 +52,9 @@ namespace resources
 #include "resources/156640.h"
 #include "resources/156641.h"
 #include "resources/156643.h"
+#include "resources/156668.h"
 #include "resources/156675.h"
+#include "resources/156679.h"
 #include "resources/156721.h"
 #include "resources/156723.h"
 #include "resources/156794.h"
@@ -60,6 +66,7 @@ namespace resources
 #include "resources/523389.h"
 #include "resources/536048.h"
 #include "resources/536052.h"
+#include "resources/961376.h"
 #include "resources/961390.h"
 #include "resources/993598.h"
 #include "resources/993687.h"
@@ -73,12 +80,15 @@ namespace resources
 #include "resources/1128581.h"
 #include "resources/1128583.h"
 #include "resources/1293677.h"
+#include "resources/1414035.h"
 #include "resources/1424219.h"
 #include "resources/1441449.h"
 #include "resources/1444520.h"
 #include "resources/1444524.h"
 #include "resources/1535141.h"
 #include "resources/1670506.h"
+#include "resources/1716667.h"
+#include "resources/1769850.h"
 #include "resources/1770211.h"
 #include "resources/1770213.h"
 #include "resources/1770215.h"
@@ -125,6 +135,7 @@ void Handler::LoadTextures()
     LoadIcon(Icons::CancelBuildEdit, resources::tex1444524).Trim(6);
     LoadIcon(Icons::ClearSearch, resources::tex157325);
     LoadIcon(Icons::Settings, resources::tex156361);
+    LoadIcon(Icons::MissingProfession, resources::tex156675);
     LoadIcon(Icons::MissingSkill, resources::tex2030307);
     LoadIcon(Icons::LandSkills, resources::tex1988171);
     LoadIcon(Icons::WaterSkills, resources::tex1988170);
@@ -144,12 +155,14 @@ void Handler::LoadTextures()
     LoadIcon(Icons::LoadingPet, resources::texLoadingPet).Trim(52);
     LoadIcon(Icons::ErrorPet, resources::texErrorPet).Trim(52);
     LoadIcon(Icons::SelectionChevron, resources::tex156058).Trim(2, 4, 2, 3).FlipVertically();
+    LoadIcon(Icons::CheckBoxChecked, resources::tex155919);
+    LoadIcon(Icons::CheckBoxUnchecked, resources::tex155923);
     LoadIcon(GW2::Profession::None, resources::tex156675);
     LoadIcon(GW2::Profession::Guardian, resources::tex156634);
     LoadIcon(GW2::Profession::Warrior, resources::tex156643);
     LoadIcon(GW2::Profession::Engineer, resources::tex156632);
     LoadIcon(GW2::Profession::Ranger, resources::tex156640);
-    LoadIcon(GW2::Profession::Thief, resources::tex1128571);
+    LoadIcon(GW2::Profession::Thief, resources::tex156641);
     LoadIcon(GW2::Profession::Elementalist, resources::tex156630);
     LoadIcon(GW2::Profession::Mesmer, resources::tex156636);
     LoadIcon(GW2::Profession::Necromancer, resources::tex156638);
@@ -225,12 +238,19 @@ void Handler::LoadTextures()
     LoadIcon(Build::Flags::OpenWorld, resources::tex156723).Trim(1);
     LoadIcon(Build::Flags::Dungeons, resources::tex1535141).Trim(6);
     LoadIcon(Build::Flags::Fractals, resources::tex1441449).Trim(4);
-    LoadIcon(Build::Flags::Raids, resources::tex1424219).Trim(6);
+    LoadIcon(Build::Flags::Raids, resources::tex1424219).Trim(4, 5, 6, 5);
     LoadIcon(Build::Flags::Power, resources::tex993687).Trim(1);
     LoadIcon(Build::Flags::Condition, resources::tex156600).Trim(3);
     LoadIcon(Build::Flags::Tank, resources::tex536048).Trim(5);
     LoadIcon(Build::Flags::Support, resources::tex156599).Trim(4);
     LoadIcon(Build::Flags::Heal, resources::tex536052).Trim(4);
+    LoadIcon(Build::Flags::Control, resources::tex156668).Trim(2);
+    LoadIcon(Build::Flags::Conquest, resources::tex102584).Trim(1);
+    LoadIcon(Build::Flags::Stronghold, resources::tex961376).Trim(3);
+    LoadIcon(Build::Flags::Duos, resources::tex156679).Trim(0, 0, 2, 2);
+    LoadIcon(Build::Flags::Zerg, resources::tex1716667).Trim(8);
+    LoadIcon(Build::Flags::Havoc, resources::tex1769850).Trim(8);
+    LoadIcon(Build::Flags::Roaming, resources::tex1414035).Trim(0);
     LoadIcon(GW2::Slot::Helm, resources::tex156307).Trim(36);
     LoadIcon(GW2::Slot::Shoulders, resources::tex156311).Trim(36);
     LoadIcon(GW2::Slot::Coat, resources::tex156297).Trim(36);
@@ -251,28 +271,18 @@ void Handler::LoadTextures()
     LoadIcon(GW2::Slot::WeaponW1, resources::tex156313).Trim(36);
     LoadIcon(GW2::Slot::WeaponW2, resources::tex156313).Trim(36);
 
-    // SELECT CONCAT('    { "id": ', id, ', "type": ', profession, ', "palette": [', GROUP_CONCAT(DISTINCT palette ORDER BY palette SEPARATOR ', '), '], "name": "', REPLACE(REPLACE(name, '\\', '\\\\'), '"', '\\"'), '" },') FROM skilldefs WHERE profession>=2 GROUP BY id ORDER BY id
     VersionCheck();
-    Web::Instance().Request("https://buildpad.gw2archive.eu/skillpalette.json", [this](std::string_view const data)
+    m_skillLoading = std::async(std::launch::async, [this] { try
     {
-        for (auto const& skill : nlohmann::json::parse(data.begin(), data.end(), nullptr, false))
-        {
-            auto const id = skill["id"];
-            auto& info = m_skills[id];
-            info.ID = id;
-            info.Type = (Skill::SkillType)skill["type"];
-            if (auto itr = std::find_if(GW2::GetSpecializationInfos().begin(), GW2::GetSpecializationInfos().end(),
-                [training = (std::string_view)skill["training"]](GW2::SpecializationInfo const& info) { return info.Name == training; }); itr != GW2::GetSpecializationInfos().end())
-                info.Specialization = itr->Specialization;
-            info.Name = skill["name"];
-            for (auto& palette : skill["palette"])
-            {
-                info.Palettes.push_back(palette);
-                m_palettes[palette].push_back(info.ID);
-            }
-        }
+        API::Instance().LoadSkillData();
+
+        while (SkillStorage::Instance().GetLoadingState() == SkillStorage::LoadingState::Loading)
+            std::this_thread::sleep_for(250ms);
 
         m_loaded = true;
+
+        if (!SkillStorage::Instance().AreSkillsLoaded())
+            return;
 
         m_arcdpsMigrationDiscovery = std::async(std::launch::async, [this]
         {
@@ -342,31 +352,20 @@ void Handler::LoadTextures()
                 build.SetName(file.Name.data());
                 build.SetLink(ChatLink::Encode(code));
             });
-            if (std::find_if(m_arcdpsTraits.begin(), m_arcdpsTraits.end(), [](Build const& build) { return build.GetParsedProfession() == GW2::Profession::Revenant; }) != m_arcdpsTraits.end())
+            if (util::find_if(m_arcdpsTraits, util::method_equals(&Build::GetParsedProfession, GW2::Profession::Revenant)))
             {
-                static std::array<std::array<uint16_t, 5>, 6> const orders
-                { {
-                    { 4572, 4564, 4651, 4614, 4554 },
-                    { 4572, 4614, 4564, 4651, 4554 },
-                    { 4572, 4651, 4614, 4564, 4554 },
-                    { 4572, 4651, 4564, 4614, 4554 },
-                    { 4572, 4564, 4614, 4651, 4554 },
-                    { 4572, 4614, 4651, 4564, 4554 },
-                } };
-                char const* alphabet = "ABCDEF";
-                for (auto const& order : orders)
-                {
-                    using code_t = ChatLink::ArcDPSCode<ChatLink::ArcDPSSkillTemplate>;
-                    code_t code;
-                    code.Type = 's';
-                    code.Data.Profession = (uint16_t)GW2::Profession::Revenant;
-                    std::copy(order.begin(), order.end(), code.Data.Land.begin());
-                    std::copy(order.begin(), order.end(), code.Data.Water.begin());
+                static std::array<uint16_t, 5> const order { 4572, 4564, 4651, 4614, 4554 };
 
-                    Build& build = m_arcdpsSkills.emplace_back(nextID--);
-                    build.SetName(fmt::format("Default {}", *alphabet++));
-                    build.SetLink(ChatLink::Encode(code));
-                }
+                using code_t = ChatLink::ArcDPSCode<ChatLink::ArcDPSSkillTemplate>;
+                code_t code;
+                code.Type = 's';
+                code.Data.Profession = (uint16_t)GW2::Profession::Revenant;
+                std::copy(order.begin(), order.end(), code.Data.Land.begin());
+                std::copy(order.begin(), order.end(), code.Data.Water.begin());
+
+                Build& build = m_arcdpsSkills.emplace_back(nextID--);
+                build.SetName("Default");
+                build.SetLink(ChatLink::Encode(code));
             }
             for (auto& container : { &m_arcdpsTraits, &m_arcdpsSkills })
             {
@@ -432,7 +431,7 @@ void Handler::LoadTextures()
             m_arcdpsMigrationAvailable = !m_arcdpsTraits.empty() || !m_arcdpsSkills.empty();
             m_arcdpsGearAvailable = !m_arcdpsGear.empty();
         });
-    }, [this](auto const&) { m_loaded = true; }, false);
+    } catch (...) { m_loaded = true; } });
     Web::Instance().Request("https://buildpad.gw2archive.eu/pets.json", [this](std::string_view const data)
     {
         for (auto const& pet : nlohmann::json::parse(data.begin(), data.end(), nullptr, false))
@@ -474,7 +473,7 @@ bool Handler::Load(std::string_view section, std::string_view name, std::string_
 {
     if (section == "Settings"sv)
     {
-        if (auto const itr = std::find_if(Config::GetFields().begin(), Config::GetFields().end(), [&name](auto const& pair) { return pair.first == name; }); itr != Config::GetFields().end())
+        if (auto const itr = util::find_if(Config::GetFields(), util::first_equals(name)))
         {
             std::visit(overloaded
             {
@@ -499,12 +498,24 @@ bool Handler::Load(std::string_view section, std::string_view name, std::string_
 
 void Handler::LoadConfig()
 {
-    FILE* file;
-    if (_wfopen_s(&file, GetConfigPath().c_str(), L"r"))
+    auto postConfigLoad = gsl::finally([this]
     {
         API::Instance().SetLanguage(m_config.APILocale);
+        m_keyBindToggleBuilds.FromString(m_config.KeyBindToggleBuilds);
+
+        if (m_config.LastLaunchedVersion < "2020-03-14")
+        {
+            for (auto const& info : Build::GetFlagInfos())
+                if (!info.VisibleByDefault)
+                    m_config.HideFlagsMask |= (uint32_t)info.Flag;
+        }
+
+        m_config.LastLaunchedVersion = m_versionCurrent;
+    });
+
+    FILE* file;
+    if (_wfopen_s(&file, GetConfigPath().c_str(), L"r"))
         return;
-    }
     auto guard = gsl::finally([file] { fclose(file); });
 
     m_config = { };
@@ -519,15 +530,11 @@ void Handler::LoadConfig()
     }, this))
     {
         m_config = m_savedConfig;
-        API::Instance().SetLanguage(m_config.APILocale);
         return;
     }
 
     BuildStorage::Instance().LoadEnd();
     m_savedConfig = m_config;
-
-    API::Instance().SetLanguage(m_config.APILocale);
-    m_keyBindToggleBuilds.FromString(m_config.KeyBindToggleBuilds);
 }
 
 void Handler::SaveConfig()
@@ -601,12 +608,39 @@ void Handler::LoadTest()
     m_shown = true;
 }
 
+void Handler::Unload()
+{
+    if (!m_loaded)
+        return;
+
+    m_loaded = false;
+
+    static auto const unloadContainer = [this](auto& container)
+    {
+        for (auto&& [key, icon] : container)
+            UnloadTexture(icon);
+    };
+    unloadContainer(GetIconContainer<Icons>());
+    unloadContainer(GetIconContainer<GW2::Profession>());
+    unloadContainer(GetIconContainer<GW2::Specialization>());
+    unloadContainer(GetIconContainer<GW2::Slot>());
+    unloadContainer(GetIconContainer<Build::Flags>());
+
+    SkillStorage::Instance().ClearProfessionSkills();
+
+    API::Instance().Unload();
+
+    while (!m_loadedTextures.empty())
+        UnloadTexture(m_loadedTextures.front());
+}
+
 Time constexpr BUILD_FADE_DURATION_FADE = 200ms;
 Time constexpr BUILD_FADE_DURATION_FULL = 750ms;
 Time constexpr LINK_PASTED_FADE_DURATION_FADE = 200ms;
 Time constexpr LINK_PASTED_FADE_DURATION_FULL = 1000ms;
 Time constexpr MIGRATION_SUCCESS_FADE_DURATION_FADE = 200ms;
 Time constexpr MIGRATION_SUCCESS_FADE_DURATION_FULL = 750ms;
+float UI_SCALE = 1.0f;
 ImVec2 LINE_SIZE { };
 ImVec2 WINDOW_PADDING { };
 ImVec2 FRAME_PADDING { };
@@ -614,17 +648,36 @@ ImVec2 ITEM_SPACING { };
 ImVec2 ITEM_INNER_SPACING { };
 float INDENT_SPACING { };
 ImVec2 BUTTON_SIZE { 19, 19 };
+ImVec4 BUTTON_COLOR { };
+ImVec4 BUTTON_COLOR_ACTIVE { };
+ImVec4 BUTTON_COLOR_HOVERED { };
+
+// ReSharper disable CppUserDefinedLiteralSuffixDoesNotStartWithUnderscore
+#pragma warning(suppress: 4455) // I disagree with the standard, so sue me.
+float operator"" px(unsigned long long int const value) { return (float)(signed long long int)value * UI_SCALE; }
+// ReSharper restore CppUserDefinedLiteralSuffixDoesNotStartWithUnderscore
 
 bool Handler::HandleKeyBinds()
 {
     if (!m_loaded)
         return false;
 
+    BuildStorage& storage = BuildStorage::Instance();
+
     if (m_keyBindToggleBuilds.IsPressed())
     {
         m_shown ^= true;
-        ImGui::CaptureKeyboardFromApp();
-        return true;
+        if (!m_keyBindToggleBuilds.PassThrough)
+            return ImGui::CaptureKeyboardFromApp(), true;
+    }
+    for (auto const& build : BuildStorage::Instance().GetBuilds())
+    {
+        if (KeyBind const& keyBind = build.GetKeyBind(); keyBind && storage.GetCurrentProfession() != GW2::Profession::None && build.GetParsedProfession() == storage.GetCurrentProfession() && keyBind.IsPressed())
+        {
+            ImGui::SetClipboardText(fmt::format("{}", build.GetLink()).c_str());
+            if (!keyBind.PassThrough)
+                return ImGui::CaptureKeyboardFromApp(), true;
+        }
     }
 
     return false;
@@ -635,7 +688,21 @@ void Handler::Update()
     if (!m_loaded)
         return;
 
+    BuildStorage& storage = BuildStorage::Instance();
+
+    if (m_config.ClearFiltersOnWindowClose && !m_shown)
+    {
+        if (storage.IsFilteringName())
+            storage.SetNameFilter({});
+
+        if (storage.IsFilteringFlags())
+            for (auto const& info : Build::GetFlagInfos())
+                if (storage.IsFilteringFlag(info.Flag))
+                    storage.ToggleFlagFilter(info.Flag, false);
+    }
+
     if (!m_shown &&
+        m_editedBuilds.empty() &&
         !m_arcdpsMigrationShown &&
         !m_arcdpsGearShown &&
         !m_detachSettings &&
@@ -665,8 +732,6 @@ void Handler::Update()
         }
     }
 
-    BuildStorage& storage = BuildStorage::Instance();
-
     if (m_previousUpdate == Clock::time_point { })
         m_previousUpdate = Clock::now();
 
@@ -687,17 +752,23 @@ void Handler::Update()
         Sleep(10 - (DWORD)delta.count());
 #endif
 
-    LINE_SIZE = ImGui::CalcTextSize("");
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.back());
+    UI_SCALE = GetUIScale();
+    LINE_SIZE = ImGui::CalcTextSize("") * UI_SCALE;
     WINDOW_PADDING = ImGui::GetStyle().WindowPadding;
     FRAME_PADDING = ImGui::GetStyle().FramePadding;
     ITEM_SPACING = ImGui::GetStyle().ItemSpacing;
     ITEM_INNER_SPACING = ImGui::GetStyle().ItemInnerSpacing;
     INDENT_SPACING = ImGui::GetStyle().IndentSpacing;
     BUTTON_SIZE.x = BUTTON_SIZE.y = FRAME_PADDING.y + LINE_SIZE.y + FRAME_PADDING.y;
+    BUTTON_COLOR = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Button));
+    BUTTON_COLOR_ACTIVE = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_ButtonActive));
+    BUTTON_COLOR_HOVERED = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_ButtonHovered));
 
     #pragma region Debug Window
 #ifdef _DEBUG
     ImGui::Begin("[DEBUG]", &m_shown);
+    ImGui::SetWindowFontScale(UI_SCALE);
     int prof = (int)storage.GetCurrentProfession();
     ImGui::SliderInt("[TEST PROF]", &prof, 0, 9);
     storage.SetCurrentProfession((GW2::Profession)prof);
@@ -722,12 +793,16 @@ void Handler::Update()
     if (m_shown)
         RenderMainWindow(delta);
 
+    if (!m_editedBuilds.empty())
+        RenderBuildEditors();
+
     if (m_arcdpsMigrationShown)
     {
         ImGui::OpenPopup("BuildPad##ArcDPSMigration");
-        ImGui::SetNextWindowSizeConstraints({ 750, 650 }, { 10000, 10000 });
+        ImGui::SetNextWindowSizeConstraints({ 750px, 650px }, { 10000px, 10000px });
         if (ImGui::BeginPopupModal("BuildPad##ArcDPSMigration", &m_arcdpsMigrationShown, ImGuiWindowFlags_NoScrollbar))
         {
+            ImGui::SetWindowFontScale(UI_SCALE);
             if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(VK_ESCAPE, false))
             {
                 m_arcdpsMigrationShown = false;
@@ -752,9 +827,10 @@ void Handler::Update()
 
     if (m_arcdpsGearShown)
     {
-        ImGui::SetNextWindowSizeConstraints({ 750, 600 }, { 10000, 10000 });
+        ImGui::SetNextWindowSizeConstraints({ 750px, 600px }, { 10000px, 10000px });
         ImGui::SetNextWindowPosCenter(ImGuiSetCond_Appearing);
         ImGui::Begin("BuildPad##ArcDPSGear", &m_arcdpsGearShown, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::SetWindowFontScale(UI_SCALE);
         if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(VK_ESCAPE, false))
         {
             m_arcdpsGearShown = false;
@@ -785,6 +861,7 @@ void Handler::Update()
     if (m_detachSettings)
     {
         ImGui::Begin("BuildPad Settings", &m_detachSettings, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::SetWindowFontScale(UI_SCALE);
         if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(VK_ESCAPE, false))
         {
             m_detachSettings = false;
@@ -796,6 +873,7 @@ void Handler::Update()
 
     ImGui::PopStyleColor();
     ImGui::GetStyle().WindowTitleAlign.x = originalWindowTitleAlign;
+    ImGui::PopFont();
 }
 
 void Handler::UpdateOptions()
@@ -863,7 +941,7 @@ void Handler::RenderMainWindow(Time const& delta)
 
     #pragma region BuildPad Window
     {
-        auto flags = (ImGuiWindowFlags_)0;
+        auto flags = (ImGuiWindowFlags_)(ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoFocusOnAppearing);
         if (m_config.LockWindowPosition)
         {
             ImGui::SetNextWindowPos({ (float)m_config.WindowPositionX, (float)m_config.WindowPositionY }, ImGuiSetCond_Always);
@@ -877,11 +955,14 @@ void Handler::RenderMainWindow(Time const& delta)
             flags = (ImGuiWindowFlags_)(flags | ImGuiWindowFlags_NoResize);
         }
         else
-            ImGui::SetNextWindowSize({ 300, 400 }, ImGuiSetCond_FirstUseEver);
+            ImGui::SetNextWindowSize({ 300px, 400px }, ImGuiSetCond_FirstUseEver);
+        if (m_config.HideWindowHeader)
+            flags = (ImGuiWindowFlags_)(flags | ImGuiWindowFlags_NoTitleBar);
         if (m_config.AutoWindowHeight)
             flags = (ImGuiWindowFlags_)(flags | ImGuiWindowFlags_NoScrollbar);
-        ImGui::SetNextWindowSizeConstraints({ 150, 0 }, ImGui::GetIO().DisplaySize);
+        ImGui::SetNextWindowSizeConstraints({ 150px, 0 }, ImGui::GetIO().DisplaySize);
         ImGui::Begin("BuildPad", &m_shown, flags);
+        ImGui::SetWindowFontScale(UI_SCALE);
         if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(VK_ESCAPE, false))
         {
             m_shown = false;
@@ -909,11 +990,25 @@ void Handler::RenderMainWindow(Time const& delta)
         }
         if (ImGui::BeginPopup("##BuildPadContextMenu"))
         {
+            ImGui::SetWindowFontScale(UI_SCALE);
             RenderSettings(true);
             ImGui::EndPopup();
         }
     }
     #pragma endregion
+
+    if (SkillStorage::Instance().GetLoadingState() == SkillStorage::LoadingState::Failed)
+    {
+        ImGui::BeginGroup();
+        ImGui::PushStyleColor(ImGuiCol_Text, { 1.0f, 0.0f, 0.0f, 1.0f });
+        ImGui::TextWrapped("Failed to load skill data from Guild Wars 2 API. The API might be unavailable, or BuildPad might need to be updated.\n\nSome functionality is disabled.\n\nRestart Guild Wars 2 to try again.");
+        ImGui::PopStyleColor();
+        ImGui::EndGroup();
+        ImGui::NewLine();
+
+        ImVec2 const offset { 2px, 2px };
+        ImGui::GetCurrentWindow()->DrawList->AddRect(ImGui::GetItemRectMin() - offset, ImVec2 { ImGui::GetItemRectMin().x + ImGui::GetContentRegionAvailWidth(), ImGui::GetItemRectMax().y } +offset, ImGui::GetColorU32(ImGuiCol_Border), ImGui::GetStyle().ChildWindowRounding);
+    }
 
     if ((m_arcdpsMigrationAvailable || m_arcdpsGearAvailable) && !m_config.ArcDPSMigrationHintHidden)
     {
@@ -923,14 +1018,14 @@ void Handler::RenderMainWindow(Time const& delta)
             m_arcdpsMigrationShown = true;
         if (m_arcdpsGearAvailable && ImGui::Button("View Equipment/Legendary Templates", { std::max<float>(FRAME_PADDING.x + ImGui::CalcTextSize("View Equipment/Legendary Templates").x + FRAME_PADDING.x, ImGui::GetContentRegionAvailWidth()), 0 }))
             m_arcdpsGearShown = true;
-        if (ImGui::Button("Dismiss"))
+        if (ImGui::Button("Dismiss##ArcDPSMigrationHint"))
             m_config.ArcDPSMigrationHintHidden = true;
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("You can always access these options from the settings menu");
+            ImGui::Tooltip("You can always access these options from the settings menu");
         ImGui::EndGroup();
         ImGui::NewLine();
 
-        ImVec2 const offset { 2, 2 };
+        ImVec2 const offset { 2px, 2px };
         ImGui::GetCurrentWindow()->DrawList->AddRect(ImGui::GetItemRectMin() - offset, ImVec2 { ImGui::GetItemRectMin().x + ImGui::GetContentRegionAvailWidth(), ImGui::GetItemRectMax().y } +offset, ImGui::GetColorU32(ImGuiCol_Border), ImGui::GetStyle().ChildWindowRounding);
     }
 
@@ -959,7 +1054,7 @@ void Handler::RenderMainWindow(Time const& delta)
             ImGui::EndGroup();
             ImGui::NewLine();
 
-            ImVec2 const offset { 2, 2 };
+            ImVec2 const offset { 2px, 2px };
             ImGui::GetCurrentWindow()->DrawList->AddRect(ImGui::GetItemRectMin() - offset, ImVec2 { ImGui::GetItemRectMin().x + ImGui::GetContentRegionAvailWidth(), ImGui::GetItemRectMax().y } + offset, ImGui::GetColorU32(ImGuiCol_Border), ImGui::GetStyle().ChildWindowRounding);
         }
     }
@@ -976,7 +1071,7 @@ void Handler::RenderMainWindow(Time const& delta)
                 if (ImGui::Checkbox("Stop asking about this version", &on))
                     m_config.SkipUpdateVersion = m_versionLatest.Version;
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("You can always update through the settings menu");
+                    ImGui::Tooltip("You can always update through the settings menu");
 
                 if (ImGui::Button("Update"))
                     VersionUpdate();
@@ -986,13 +1081,10 @@ void Handler::RenderMainWindow(Time const& delta)
             case VersionUpdateState::Downloading:
                 ImGui::TextWrapped("Updating to %s...", m_versionLatest.Version.c_str());
                 break;
-            case VersionUpdateState::Manifesting:
-                ImGui::TextWrapped("Finalizing...");
-                break;
             case VersionUpdateState::Done:
                 ImGui::TextColored({ 0.0f, 1.0f, 0.0f, 1.0f }, "Updated to %s!", m_versionLatest.Version.c_str());
                 ImGui::TextColored({ 1.0f, 1.0f, 1.0f, 0.5f }, "Restart Guild Wars 2 to apply the update.");
-                if (ImGui::Button("Dismiss"))
+                if (ImGui::Button("Dismiss##VersionUpdate"))
                     m_needsUpdate = false;
                 ImGui::SameLine();
                 break;
@@ -1023,7 +1115,7 @@ void Handler::RenderMainWindow(Time const& delta)
             ImGui::OpenPopup("##BuildPadContextMenu");
 
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Can also be accessed by right-clicking the window header");
+            ImGui::Tooltip("Can also be accessed by right-clicking the window header");
     };
 
     #pragma region Filter Panel
@@ -1039,12 +1131,12 @@ void Handler::RenderMainWindow(Time const& delta)
                 ImGui::CheckboxImage(icon.Texture, "##ToggleProfessionFilter", &on, { 0.0625f, 0.0625f }, { 0.9375f, 0.9375f }, 0.4f, 0.6f, 0.5f, 0.9f, 1.0f, 0.95f))
                 storage.ToggleProfessionFilter(on);
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Only show builds for my profession");
+                ImGui::Tooltip("Only show builds for my profession");
 
             if (m_config.ShowSettingsButton && !m_config.ShowNameFilter && !m_config.ShowFlagsFilter)
             {
                 ImGui::SameLine(0, 0);
-                renderSettingsButton(ImGui::GetContentRegionAvailWidth() - WINDOW_PADDING.x - (LINE_SIZE.y + FRAME_PADDING.y * 2));
+                renderSettingsButton(ImGui::GetContentRegionAvailWidth() - WINDOW_PADDING.x - BUTTON_SIZE.x);
             }
             else
             {
@@ -1059,7 +1151,7 @@ void Handler::RenderMainWindow(Time const& delta)
         {
             float const x = ImGui::GetCursorPosX();
             auto buffer = util::to_buffer(storage.GetNameFilter());
-            if (ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() - WINDOW_PADDING.x - (storage.IsFilteringName() || m_config.ShowSettingsButton ? ITEM_INNER_SPACING.x + LINE_SIZE.y + FRAME_PADDING.y * 2 : 0));
+            if (ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() - WINDOW_PADDING.x - (storage.IsFilteringName() || m_config.ShowSettingsButton ? ITEM_INNER_SPACING.x + BUTTON_SIZE.x : 0));
                 ImGui::InputText("##FilterName", buffer.data(), buffer.size()))
                 storage.SetNameFilter(buffer.data());
             ImGui::PopItemWidth();
@@ -1094,7 +1186,7 @@ void Handler::RenderMainWindow(Time const& delta)
             ImGui::SameLine(0, 0);
             uint32_t inlineProfessionFiler = storage.CanFilterProfession() && m_config.ShowProfessionFilter && !m_config.ShowNameFilter ? 1 : 0;
             uint32_t inlineSettingsButton = m_config.ShowSettingsButton && !m_config.ShowNameFilter ? 1 : 0;
-            float separatorWidth = ImGui::GetContentRegionAvailWidth() - (m_config.ShowNameFilter || !inlineProfessionFiler ? WINDOW_PADDING.x : 0) - (inlineSettingsButton ? LINE_SIZE.y + FRAME_PADDING.y * 2 : 0) - WINDOW_PADDING.x;
+            float separatorWidth = ImGui::GetContentRegionAvailWidth() - (m_config.ShowNameFilter || !inlineProfessionFiler ? WINDOW_PADDING.x : 0) - (inlineSettingsButton ? BUTTON_SIZE.x : 0) - WINDOW_PADDING.x;
             uint32_t separatorCount = 0;
             bool hiddenSeparator = false;
             for (auto const& info : Build::GetFlagInfos())
@@ -1108,10 +1200,10 @@ void Handler::RenderMainWindow(Time const& delta)
                 if (info.Separator || hiddenSeparator)
                     ++separatorCount;
                 hiddenSeparator = false;
-                separatorWidth -= LINE_SIZE.y + FRAME_PADDING.y * 2;
+                separatorWidth -= BUTTON_SIZE.x;
             }
             separatorWidth /= (float)(inlineProfessionFiler + separatorCount + inlineSettingsButton);
-            //float separatorWidth = (ImGui::GetContentRegionAvailWidth() - (m_config.ShowNameFilter || !inlineProfessionFiler ? WINDOW_PADDING.x : 0) - Build::GetFlagInfos().size() * (LINE_SIZE.y + FRAME_PADDING.y * 2) - WINDOW_PADDING.x)
+            //float separatorWidth = (ImGui::GetContentRegionAvailWidth() - (m_config.ShowNameFilter || !inlineProfessionFiler ? WINDOW_PADDING.x : 0) - Build::GetFlagInfos().size() * BUTTON_SIZE.x - WINDOW_PADDING.x)
             //                       / (inlineProfessionFiler + std::count_if(Build::GetFlagInfos().begin(), Build::GetFlagInfos().end(), [](auto const& info) { return info.Separator; }));
 
             hiddenSeparator = false;
@@ -1138,6 +1230,7 @@ void Handler::RenderMainWindow(Time const& delta)
                 if (ImGui::IsItemHovered())
                 {
                     ImGui::BeginTooltip();
+                    ImGui::SetWindowFontScale(UI_SCALE);
                     ImVec4 color = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Text));
                     color.w /= 2;
                     ImGui::TextColored(color, "Show builds flagged as");
@@ -1155,6 +1248,7 @@ void Handler::RenderMainWindow(Time const& delta)
 
     #pragma region Builds
     ImGui::BeginChild("Builds", { 0, 0 }, true);
+    ImGui::SetWindowFontScale(UI_SCALE);
 
     static Build::id_t newestAddedBuild { };
     static Build::id_t removeBuildPrompt { };
@@ -1176,7 +1270,7 @@ void Handler::RenderMainWindow(Time const& delta)
             if (filter && !filter(build))
                 continue;
 
-            if (!storage.IsEditingBuild(build) && !storage.IsBuildMatchingFilter(build))
+            if (!storage.IsEditingBuild(build) && !storage.IsBuildMatchingFilter(build, m_config.SimpleFlagsFilter))
                 continue;
 
             BeginRenderBuildList(build.GetParsedProfession(), firstVisibleBuild, firstSortedBuild, storage.IsFilteringProfession(), storage.IsEditingBuild(build) ? storage.GetEditedBuild().GetParsedProfession() : build.GetParsedProfession());
@@ -1218,7 +1312,7 @@ void Handler::RenderMainWindow(Time const& delta)
                 #pragma region Build Name Input
                 float x;
                 {
-                    TextureData const& icon = GetIcon(edited.GetParsedSpecialization());
+                    TextureData const& icon = edited.GetParsedSpecialization() != GW2::Specialization::None ? GetIcon(edited.GetParsedSpecialization()) : GetIcon(edited.GetParsedProfession());
 
                     auto buffer = util::to_buffer(edited.GetName());
                     if (ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Button))),
@@ -1226,9 +1320,9 @@ void Handler::RenderMainWindow(Time const& delta)
                         ImGui::ImageButtonWithText(icon.Texture, "", BUTTON_SIZE, BUTTON_SIZE, { 0.0625f, 0.0625f }, { 0.9375f, 0.9375f }, 1 | 8),
                         hovered = ImGui::IsItemHovered(),
                         ImGui::PopStyleColor(2),
-                        ImGui::SameLine(0, 2),
+                        ImGui::SameLine(0, 2px),
                         x = ImGui::GetCursorPosX(),
-                        ImGui::PushItemWidth(-1 - BUTTON_SIZE.x - 2  - BUTTON_SIZE.x - 2),
+                        ImGui::PushItemWidth(-1 - BUTTON_SIZE.x - 2px - BUTTON_SIZE.x - 2px),
                         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { FRAME_PADDING.x, (BUTTON_SIZE.y - LINE_SIZE.y) / 2 }),
                         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0),
                         [&] { if (m_focusNewBuild == edited.GetID()) { ImGui::SetKeyboardFocusHere(); m_focusNewBuild = { }; } }();
@@ -1239,19 +1333,25 @@ void Handler::RenderMainWindow(Time const& delta)
                 }
                 #pragma endregion
                 #pragma region Build Edit Accept Button
-                if (ImGui::SameLine(0, 2);
+                if (ImGui::SameLine(0, 2px);
                     ImGui::ImageButtonWithText(GetIcon(Icons::AcceptBuildEdit), fmt::format("##AcceptBuildEdit:{0}", build.GetID()).c_str(), BUTTON_SIZE, 0))
                 {
+                    if (auto const& context = util::find_if(m_editedBuilds, util::member_equals(&BuildEditContext::ID, edited.GetID())); context && context->BuildStorageEditedBuild)
+                        CloseBuildEditor(edited);
+
                     newestAddedBuild = { };
                     postAction = [&storage] { storage.AcceptBuildEdit(); };
                 }
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Accept Changes");
+                    ImGui::Tooltip("Accept Changes");
                 #pragma endregion
                 #pragma region Build Edit Cancel Button
-                if (ImGui::SameLine(0, 2);
+                if (ImGui::SameLine(0, 2px);
                     ImGui::ImageButtonWithText(GetIcon(Icons::CancelBuildEdit), fmt::format("##CancelBuildEdit:{0}", build.GetID()).c_str(), BUTTON_SIZE, 2 | 4))
                 {
+                    if (auto const& context = util::find_if(m_editedBuilds, util::member_equals(&BuildEditContext::ID, edited.GetID())); context && context->BuildStorageEditedBuild)
+                        CloseBuildEditor(edited);
+
                     if (newestAddedBuild == edited.GetID())
                     {
                         newestAddedBuild = { };
@@ -1266,7 +1366,7 @@ void Handler::RenderMainWindow(Time const& delta)
                         postAction = [&storage] { storage.CancelBuildEdit(); };
                 }
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Cancel Changes");
+                    ImGui::Tooltip("Cancel Changes");
                 #pragma endregion
                 #pragma region Build Name Input Placeholder
                 if (edited.GetName().empty())
@@ -1302,15 +1402,36 @@ void Handler::RenderMainWindow(Time const& delta)
                 }
                 #pragma endregion
 
+                auto const& parsed = edited.GetParsedInfo();
+                bool canEdit = (!alpha || alpha >= 1.0f) && (edited.GetLink().empty() || parsed.SkillsLand && parsed.SkillsWater && parsed.TraitLines) && SkillStorage::Instance().AreSkillsLoaded();
                 #pragma region Build Link Input
                 {
                     auto buffer = util::to_buffer(edited.GetLink());
                     if (ImGui::SameLine(x, 0),
                         ImGui::SetCursorPosY(ImGui::GetCursorPosY() - FRAME_PADDING.y),
-                        ImGui::PushItemWidth(-1);
+                        ImGui::PushItemWidth(canEdit ? -1 - (2px + BUTTON_SIZE.x + 2px + BUTTON_SIZE.x) : -1);
                         ImGui::InputText("##EditLink", buffer.data(), buffer.size(), ImGuiInputTextFlags_AutoSelectAll))
                         edited.SetLink(buffer.data());
                     ImGui::PopItemWidth();
+                }
+                #pragma endregion
+                #pragma region Build Link Edit Button
+                if (canEdit)
+                {
+                    auto itr = util::find_if(m_editedBuilds, util::member_equals(&BuildEditContext::ID, edited.GetID()));
+                    bool isEdited = itr && itr->BuildStorageEditedBuild;
+                    if (ImGui::SameLine(0, 2px),
+                        ImGui::PushStyleColor(ImGuiCol_Button, isEdited ? BUTTON_COLOR_HOVERED : BUTTON_COLOR),
+                        ImGui::PushStyleColor(ImGuiCol_ButtonActive, BUTTON_COLOR_ACTIVE),
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, BUTTON_COLOR_HOVERED);
+                        ImGui::ButtonEx("Edit", { BUTTON_SIZE.x + 2px + BUTTON_SIZE.x, 0 }))
+                    {
+                        if (isEdited)
+                            CloseBuildEditor(edited);
+                        else
+                            OpenBuildEditor(edited, true);
+                    }
+                    ImGui::PopStyleColor(3);
                 }
                 #pragma endregion
                 #pragma region Build Link Input Placeholder
@@ -1342,7 +1463,6 @@ void Handler::RenderMainWindow(Time const& delta)
                 }
                 #pragma endregion
 
-                auto const& parsed = edited.GetParsedInfo();
                 if (parsed.NeedsSecondaryLink)
                 {
                     #pragma region Build Secondary Link Input
@@ -1388,6 +1508,17 @@ void Handler::RenderMainWindow(Time const& delta)
                     ImGui::TextColored(color, "%s", parsed.Info.c_str());
                 }
 
+                if (ImGui::NewLine(),
+                    ImGui::SameLine(x, 0),
+                    ImGui::PushStyleColor(ImGuiCol_Button, BUTTON_COLOR),
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, BUTTON_COLOR_ACTIVE),
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, BUTTON_COLOR_HOVERED);
+                    ImGui::Button(fmt::format("{}##KeyBindBuild{}", edited.GetKeyBind().ToString().value_or("No Copy Keybind Set"), build.GetID()).c_str(), { -1, 0 }))
+                    EditKeyBind(edited.GetKeyBind(), [](KeyBind const& keyBind) { BuildStorage::Instance().GetEditedBuild().SetKeyBind(keyBind.ToString().value_or("")); });
+                if (ImGui::IsItemHovered())
+                    ImGui::TooltipWithHeader("Pressing the keybind will copy the build to clipboard", "Only when playing the build's profession");
+                ImGui::PopStyleColor(3);
+
                 #pragma region Build Flags Toggle
                 float separatorWidth = ImGui::GetContentRegionAvailWidth();
                 uint32_t separatorCount = 0;
@@ -1403,10 +1534,10 @@ void Handler::RenderMainWindow(Time const& delta)
                     if (info.Separator || hiddenSeparator)
                         ++separatorCount;
                     hiddenSeparator = false;
-                    separatorWidth -= LINE_SIZE.y + FRAME_PADDING.y * 2;
+                    separatorWidth -= BUTTON_SIZE.x;
                 }
                 separatorWidth /= separatorCount;
-                //float separatorWidth = (ImGui::GetContentRegionAvailWidth() - Build::GetFlagInfos().size() * (LINE_SIZE.y + FRAME_PADDING.y * 2))
+                //float separatorWidth = (ImGui::GetContentRegionAvailWidth() - Build::GetFlagInfos().size() * BUTTON_SIZE.x)
                 //                       / std::count_if(Build::GetFlagInfos().begin(), Build::GetFlagInfos().end(), [](auto const& info) { return info.Separator; });
 
                 hiddenSeparator = false;
@@ -1425,17 +1556,27 @@ void Handler::RenderMainWindow(Time const& delta)
                     ImGui::SameLine(0, first ? 0 : info.Separator || hiddenSeparator ? separatorWidth : 0);
                     hiddenSeparator = false;
                     first = false;
+                    if (edited.HasFlagIcon(info.Flag))
+                    {
+                        ImGui::StoreCursor();
+                        ImGui::ButtonEx("", BUTTON_SIZE, ImGuiButtonFlags_Disabled);
+                        ImGui::RestoreCursor();
+                    }
                     if (TextureData const& icon = GetIcon(info.Flag);
                         ImGui::CheckboxImage(icon.Texture, fmt::format("##{}", (int)info.Flag).c_str(), &on, icon.GetUV0(), icon.GetUV1(), 0.4f, 0.6f, 0.5f, 0.9f, 1.0f, 0.95f))
                         edited.ToggleFlag(info.Flag, on);
+                    if (edited.HasFlagIcon(info.Flag) && !edited.HasFlag(info.Flag))
+                        edited.ToggleFlagIcon(info.Flag, false);
+                    if (ImGui::IsItemClicked(1) && on)
+                        edited.ToggleFlagIcon(info.Flag, !edited.HasFlagIcon(info.Flag));
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("%s", info.Name.c_str());
+                        ImGui::TooltipWithHeader(info.Name.c_str(), on ? "Right click to {} this icon on the build" : nullptr, edited.HasFlagIcon(info.Flag) ? "hide" : "show");
                 }
                 #pragma endregion
             }
             #pragma endregion
             #pragma region Build Presenter
-            else if (storage.IsBuildMatchingFilter(build))
+            else if (storage.IsBuildMatchingFilter(build, m_config.SimpleFlagsFilter))
             {
                 #pragma region Settings up fade alpha
                 std::optional<float> alpha;
@@ -1456,9 +1597,23 @@ void Handler::RenderMainWindow(Time const& delta)
 
                 #pragma region Build Button
                 ImGui::BeginGroup();
-                ImGui::PushItemWidth(hovered ? ImGui::GetContentRegionAvailWidth() - BUTTON_SIZE.x : -1);
+                ImGui::PushItemWidth(hovered ? ImGui::GetContentRegionAvailWidth() - 1 - BUTTON_SIZE.x : -1);
+                std::string keyBindText;
+                if (KeyBind const& keyBind = build.GetKeyBind(); keyBind && storage.GetCurrentProfession() != GW2::Profession::None && build.GetParsedProfession() == storage.GetCurrentProfession())
+                {
+                    keyBindText = keyBind.ToString().value_or("");
+                    if (util::ends_with(keyBindText, " >GW2"))
+                        keyBindText = keyBindText.substr(0, keyBindText.length() - " >GW2"sv.length());
+                }
+
+                std::vector<TextureData const*> additionalIcons;
+                if (build.GetFlagIcons() != Build::Flags::None)
+                    for (auto const& info : Build::GetFlagInfos())
+                        if (build.HasFlagIcon(info.Flag))
+                            additionalIcons.emplace_back(&GetIcon(info.Flag));
+
                 if (TextureData const& icon = build.GetParsedSpecialization() != GW2::Specialization::None ? GetIcon(build.GetParsedSpecialization()) : GetIcon(build.GetParsedProfession());
-                    ImGui::ImageButtonWithText(icon.Texture, fmt::format(build.IsSaveNeeded() ? "{}*##{}" : "{}##{}", build.GetName(), build.GetID()).c_str(), { -1, BUTTON_SIZE.y }, BUTTON_SIZE, { 0.0625f, 0.0625f }, { 0.9375f, 0.9375f }, hovered ? 1 | 8 : 1 | 2 | 4 | 8)
+                    ImGui::ImageButtonWithText(icon.Texture, fmt::format(build.IsSaveNeeded() ? "{}*##{}" : "{}##{}", build.GetName(), build.GetID()).c_str(), { -1, BUTTON_SIZE.y }, BUTTON_SIZE, { 0.0625f, 0.0625f }, { 0.9375f, 0.9375f }, hovered ? 1 | 8 : 1 | 2 | 4 | 8, 0, { 0, 0, 0, 0 }, { 1, 1, 1, 1 }, false, keyBindText.c_str(), additionalIcons)
                     && !draggedOverBuild)
                 {
                     ImGui::SetClipboardText(fmt::format("{}", build.GetLink()).c_str());
@@ -1513,6 +1668,7 @@ void Handler::RenderMainWindow(Time const& delta)
                 #pragma region Build Context Menu
                 if (ImGui::BeginPopupContextItem(fmt::format("##BuildContextMenu:{}", build.GetID()).c_str()))
                 {
+                    ImGui::SetWindowFontScale(UI_SCALE);
                     bool working = copyAsTextWorkingPopupBuildID == build.GetID();
                     if (working)
                     {
@@ -1527,7 +1683,7 @@ void Handler::RenderMainWindow(Time const& delta)
 
                     if (ImGui::Selectable(working ? "Please wait..." : "Copy as Text", false, working ? ImGuiSelectableFlags_Disabled : ImGuiSelectableFlags_DontClosePopups))
                     {
-                        auto task = [this, build, popup = ImGui::GetCurrentWindow()->GetID("##BuildPadContextMenu")]
+                        auto task = [this, build]
                         {
                             if (!API::Instance().PreloadAllBuildInfos(build))
                                 return RepeatCurrentMainThreadTask(), false;
@@ -1541,7 +1697,7 @@ void Handler::RenderMainWindow(Time const& delta)
                                 stream << "\n";
                                 for (auto const& line : *parsed.TraitLines)
                                     if (line.Specialization != GW2::Specialization::None)
-                                        if (auto const& info = API::Specialization::Get((uint32_t)line.Specialization); info.Loaded)
+                                        if (auto const& info = API::Specialization::Get((uint32_t)line.Specialization))
                                             stream << fmt::format("\n{}\n- {}\n- {}\n- {}",
                                                 info.Name,
                                                 line.Traits[0] ? API::Trait::Get(info.GetTrait(0, line.Traits[0])).Name : "",
@@ -1553,18 +1709,18 @@ void Handler::RenderMainWindow(Time const& delta)
                                 stream << "\n";
                                 if (parsed.SkillsLand)
                                     stream << fmt::format("\nTerrestrial Skills:\n- {}\n- {}\n- {}\n- {}\n- {}",
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[0], parsed.RevenantLegendsLand[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[1], parsed.RevenantLegendsLand[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[2], parsed.RevenantLegendsLand[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[3], parsed.RevenantLegendsLand[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[4], parsed.RevenantLegendsLand[0])).Name);
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[0], parsed.RevenantLegendsLand[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[1], parsed.RevenantLegendsLand[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[2], parsed.RevenantLegendsLand[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[3], parsed.RevenantLegendsLand[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[4], parsed.RevenantLegendsLand[0])).Name);
                                 if (parsed.SkillsWater)
                                     stream << fmt::format("\nAquatic Skills:\n- {}\n- {}\n- {}\n- {}\n- {}",
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[0], parsed.RevenantLegendsWater[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[1], parsed.RevenantLegendsWater[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[2], parsed.RevenantLegendsWater[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[3], parsed.RevenantLegendsWater[0])).Name,
-                                        API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[4], parsed.RevenantLegendsWater[0])).Name);
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[0], parsed.RevenantLegendsWater[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[1], parsed.RevenantLegendsWater[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[2], parsed.RevenantLegendsWater[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[3], parsed.RevenantLegendsWater[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[4], parsed.RevenantLegendsWater[0])).Name);
                             }
                             switch (parsed.Profession)
                             {
@@ -1580,16 +1736,20 @@ void Handler::RenderMainWindow(Time const& delta)
                                 case GW2::Profession::Revenant:
                                     stream << "\n";
                                     stream << fmt::format("\nTerrestrial Legends:\n- {}\n- {}",
-                                        API::Skill::Get(GW2::GetRevenantLegendInfo(parsed.RevenantLegendsLand[0]).SwapSkill).Name,
-                                        API::Skill::Get(GW2::GetRevenantLegendInfo(parsed.RevenantLegendsLand[1]).SwapSkill).Name);
+                                        API::Skill::Get(SkillStorage::Instance().GetRevenantLegendSwapSkill(parsed.RevenantLegendsLand[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().GetRevenantLegendSwapSkill(parsed.RevenantLegendsLand[1])).Name);
                                     stream << fmt::format("\nAquatic Legends:\n- {}\n- {}",
-                                        API::Skill::Get(GW2::GetRevenantLegendInfo(parsed.RevenantLegendsWater[0]).SwapSkill).Name,
-                                        API::Skill::Get(GW2::GetRevenantLegendInfo(parsed.RevenantLegendsWater[1]).SwapSkill).Name);
+                                        API::Skill::Get(SkillStorage::Instance().GetRevenantLegendSwapSkill(parsed.RevenantLegendsWater[0])).Name,
+                                        API::Skill::Get(SkillStorage::Instance().GetRevenantLegendSwapSkill(parsed.RevenantLegendsWater[1])).Name);
                                     break;
                                 default:
                                     break;
                             }
+#if _WIN32
+                            ImGui::SetClipboardText(util::replace_all(stream.str(), "\n", "\r\n").c_str());
+#else
                             ImGui::SetClipboardText(stream.str().c_str());
+#endif
                             copyAsTextClosePopupBuildID = build.GetID();
                             return true;
                         };
@@ -1608,26 +1768,26 @@ void Handler::RenderMainWindow(Time const& delta)
                         auto const& parsed = build.GetParsedInfo();
                         if (parsed.SkillsLand)
                             ImGui::SetClipboardText(fmt::format("{}{}{}{}{}",
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[0], parsed.RevenantLegendsLand[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[1], parsed.RevenantLegendsLand[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[2], parsed.RevenantLegendsLand[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[3], parsed.RevenantLegendsLand[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsLand)[4], parsed.RevenantLegendsLand[0])).ToChatLink()).c_str());
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[0], parsed.RevenantLegendsLand[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[1], parsed.RevenantLegendsLand[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[2], parsed.RevenantLegendsLand[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[3], parsed.RevenantLegendsLand[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsLand)[4], parsed.RevenantLegendsLand[0])).ToChatLink()).c_str());
                     }
                     if (ImGui::Selectable("Copy Aquatic Skills as Chat Links", false, !build.GetParsedInfo().SkillsWater ? ImGuiSelectableFlags_Disabled : 0))
                     {
                         auto const& parsed = build.GetParsedInfo();
                         if (parsed.SkillsWater)
                             ImGui::SetClipboardText(fmt::format("{}{}{}{}{}",
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[0], parsed.RevenantLegendsWater[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[1], parsed.RevenantLegendsWater[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[2], parsed.RevenantLegendsWater[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[3], parsed.RevenantLegendsWater[0])).ToChatLink(),
-                                API::Skill::Get(SkillPaletteToSkill((*parsed.SkillsWater)[4], parsed.RevenantLegendsWater[0])).ToChatLink()).c_str());
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[0], parsed.RevenantLegendsWater[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[1], parsed.RevenantLegendsWater[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[2], parsed.RevenantLegendsWater[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[3], parsed.RevenantLegendsWater[0])).ToChatLink(),
+                                API::Skill::Get(SkillStorage::Instance().FromPalette((*parsed.SkillsWater)[4], parsed.RevenantLegendsWater[0])).ToChatLink()).c_str());
                     }
                     if (ImGui::Selectable(working ? "Please wait..." : "Copy Traits as Chat Links", false, !build.GetParsedInfo().TraitLines || working ? ImGuiSelectableFlags_Disabled : ImGuiSelectableFlags_DontClosePopups))
                     {
-                        auto task = [this, build, popup = ImGui::GetCurrentWindow()->GetID("##BuildPadContextMenu")]
+                        auto task = [this, build]
                         {
                             if (!API::Instance().PreloadAllBuildInfos(build))
                                 return RepeatCurrentMainThreadTask(), false;
@@ -1636,7 +1796,7 @@ void Handler::RenderMainWindow(Time const& delta)
                             std::ostringstream stream;
                             for (auto const& line : *parsed.TraitLines)
                                 if (line.Specialization != GW2::Specialization::None)
-                                    if (auto const& info = API::Specialization::Get((uint32_t)line.Specialization); info.Loaded)
+                                    if (auto const& info = API::Specialization::Get((uint32_t)line.Specialization))
                                         stream << fmt::format(" {} {}{}{}",
                                             info.Name,
                                             line.Traits[0] ? API::Trait::Get(info.GetTrait(0, line.Traits[0])).ToChatLink() : "-",
@@ -1659,21 +1819,45 @@ void Handler::RenderMainWindow(Time const& delta)
                             OnMainThread(std::move(task));
                         }
                     }
-                    if (ImGui::Selectable("Copy Traits as Numbers", false, !build.GetParsedInfo().TraitLines ? ImGuiSelectableFlags_Disabled : 0))
+                    if (ImGui::Selectable(working ? "Please wait..." : "Copy Traits as Numbers", false, !build.GetParsedInfo().TraitLines || working ? ImGuiSelectableFlags_Disabled : ImGuiSelectableFlags_DontClosePopups))
                     {
-                        auto const& parsed = build.GetParsedInfo();
-                        std::ostringstream stream;
-                        for (auto const& line : *parsed.TraitLines)
-                            if (line.Specialization != GW2::Specialization::None)
-                                stream << fmt::format(" {} {}{}{}",
-                                    GW2::GetSpecializationInfo(line.Specialization).Name,
-                                    (uint32_t)line.Traits[0],
-                                    (uint32_t)line.Traits[1],
-                                    (uint32_t)line.Traits[2]);
+                        auto task = [this, build]
+                        {
+                            if (!API::Instance().PreloadAllBuildInfos(build))
+                                return RepeatCurrentMainThreadTask(), false;
 
-                        if (std::string const str = stream.str(); !str.empty())
-                            ImGui::SetClipboardText(str.substr(1).c_str());
+                            auto const& parsed = build.GetParsedInfo();
+                            std::ostringstream stream;
+                            for (auto const& line : *parsed.TraitLines)
+                                if (line.Specialization != GW2::Specialization::None)
+                                    if (auto const& info = API::Specialization::Get((uint32_t)line.Specialization))
+                                        stream << fmt::format(" {} {}{}{}",
+                                            info.Name,
+                                            (uint32_t)line.Traits[0],
+                                            (uint32_t)line.Traits[1],
+                                            (uint32_t)line.Traits[2]);
+
+                            if (std::string const str = stream.str(); !str.empty())
+                                ImGui::SetClipboardText(str.substr(1).c_str());
+
+                            copyAsTextClosePopupBuildID = build.GetID();
+                            return true;
+                        };
+
+                        if (task())
+                            ImGui::CloseCurrentPopup();
+                        else
+                        {
+                            copyAsTextWorkingPopupBuildID = build.GetID();
+                            copyAsTextExistsPopupBuildID = true;
+                            OnMainThread(std::move(task));
+                        }
                     }
+
+                    ImGui::Separator();
+
+                    if (ImGui::Selectable("Edit", false, !(build.GetLink().empty() || build.GetParsedInfo().SkillsLand && build.GetParsedInfo().SkillsWater && build.GetParsedInfo().TraitLines) || !SkillStorage::Instance().AreSkillsLoaded() ? ImGuiSelectableFlags_Disabled : 0))
+                        OpenBuildEditor(build, false);
 
                     ImGui::Separator();
 
@@ -1686,13 +1870,21 @@ void Handler::RenderMainWindow(Time const& delta)
 
                 #pragma region Build Edit Button
                 if (hovered)
+                {
                     if (ImGui::SameLine(0, 0);
                         ImGui::ImageButtonWithText(GetIcon(Icons::EditBuild), fmt::format("##EditBuild:{0}", build.GetID()).c_str(), BUTTON_SIZE, 2 | 4))
+                    {
+                        if (storage.IsEditingBuild())
+                            if (auto const& context = util::find_if(m_editedBuilds, util::member_equals(&BuildEditContext::ID, storage.GetEditedBuild().GetID())); context && context->BuildStorageEditedBuild)
+                                CloseBuildEditor(storage.GetEditedBuild());
+
                         postAction = [&storage, editedBuild = build.GetID()]
                         {
                             if (Build* build = storage.FindBuild(editedBuild))
                                 storage.EditBuild(*build);
                         };
+                    }
+                }
                 #pragma endregion
                 ImGui::EndGroup();
                 hovered = ImGui::IsItemHovered();
@@ -1731,7 +1923,8 @@ void Handler::RenderMainWindow(Time const& delta)
                 else if (m_tooltipShown)
                 {
                     ImGui::BeginTooltip();
-                    RenderBuildTooltip(build);
+                    ImGui::SetWindowFontScale(UI_SCALE);
+                    RenderBuildTooltip(storage.IsEditingBuild(build) ? storage.GetEditedBuild() : build, !storage.IsEditingBuild(build));
                     ImGui::EndTooltip();
                 }
             }
@@ -1803,6 +1996,10 @@ void Handler::RenderMainWindow(Time const& delta)
         if (TextureData const& icon = GetIcon(Icons::AddBuild);
             ImGui::CheckboxImage(icon.Texture, "Add Build", &on, icon.GetUV0(), icon.GetUV1(), 0, 0, 0, 0.5f, 1.0f, 0.75f))
         {
+            if (storage.IsEditingBuild())
+                if (auto const& context = util::find_if(m_editedBuilds, util::member_equals(&BuildEditContext::ID, storage.GetEditedBuild().GetID())); context && context->BuildStorageEditedBuild)
+                    CloseBuildEditor(storage.GetEditedBuild());
+
             Build& build = storage.AddBuild();
             newestAddedBuild = build.GetID();
             m_focusNewBuild = build.GetID();
@@ -1846,21 +2043,25 @@ void Handler::RenderMainWindow(Time const& delta)
         {
             if (ImGui::BeginPopupModal("BuildPad##ConfirmBuildDeletion", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
             {
+                ImGui::SetWindowFontScale(UI_SCALE);
                 ImGui::Text("Are you sure you want to delete this build?");
                 bool on = true;
                 ImGui::CheckboxImage(GetIcon(build->GetParsedSpecialization()).Texture, fmt::format("{}", build->GetName()).c_str(), &on, { 0.0625f, 0.0625f }, { 0.9375f, 0.9375f }, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
                 ImGui::NewLine();
-                if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() - 50 - ITEM_SPACING.x - 50); ImGui::Button("Yes", { 50, 0 }))
+                if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() + WINDOW_PADDING.x - 50px - ITEM_SPACING.x - 50px); ImGui::Button("Yes", { 50px, 0 }))
                 {
-                    postAction = [&storage, removeBuild = removeBuildPrompt]
+                    postAction = [this, &storage, removeBuild = removeBuildPrompt]
                     {
                         if (Build* build = storage.FindBuild(removeBuild))
+                        {
+                            CloseBuildEditor(*build);
                             storage.RemoveBuild(*build);
+                        }
                     };
                     removeBuildPrompt = { };
                     ImGui::CloseCurrentPopup();
                 }
-                if (ImGui::SameLine(); ImGui::Button("No", { 50, 0 }))
+                if (ImGui::SameLine(); ImGui::Button("No", { 50px, 0 }))
                 {
                     removeBuildPrompt = { };
                     ImGui::CloseCurrentPopup();
@@ -1871,8 +2072,89 @@ void Handler::RenderMainWindow(Time const& delta)
     }
     #pragma endregion
 
+    #pragma region Snow
+    static bool snow = [] { time_t t = time(nullptr); tm tm { }; localtime_s(&tm, &t); return tm.tm_mon >= 11 && tm.tm_mday >= 22 || tm.tm_mon <= 0 && tm.tm_mday <= 4; }();
+    if (snow && m_config.Snow && delta < 1s)
+    {
+        static std::mt19937 mt { std::random_device{}() };
+        static auto const random = [](uint32_t min = 0, uint32_t max = std::numeric_limits<uint32_t>::max()) { return std::uniform_int_distribution<uint32_t> { min, max }(mt); };
+        struct Snowflake
+        {
+            uint32_t Lifetime = 0;
+            uint32_t Seed;
+            ImVec2 Position;
+        };
+        static std::array<Snowflake, 500> snowflakes { };
+        static ImU32 snowflakeColor = ImGui::ColorConvertFloat4ToU32({ 1.0f, 1.0f, 1.0f, 1.0f });
+        static Time nextSnowflakeCooldown { };
+        float const perSecond = (float)delta.count() / 1000ms .count();
+
+        bool spawned = false;
+        if (nextSnowflakeCooldown > delta)
+            nextSnowflakeCooldown -= delta;
+
+        auto* window = ImGui::GetCurrentWindow();
+        static std::optional<ImVec2> prevWindowPos;
+        static std::optional<ImVec2> prevWindowSize;
+        bool resizing = prevWindowSize && (prevWindowSize->x != window->Size.x || prevWindowSize->y != window->Size.y);
+        static ImVec2 drag { };
+        if (prevWindowPos && (prevWindowPos->x != window->Pos.x || prevWindowPos->y != window->Pos.y))
+            drag += (window->Pos - *prevWindowPos) / 20;
+        drag *= std::max<float>(0.0f, 1.0f - 5.0f * perSecond);
+
+        for (auto& snowflake : snowflakes)
+        {
+            if (!snowflake.Lifetime)
+            {
+                if (!spawned && nextSnowflakeCooldown <= delta)
+                {
+                    spawned = true;
+                    nextSnowflakeCooldown = Time(100 + random(0, 500));
+                    snowflake.Seed = random();
+                    snowflake.Position.x = window->Pos.x + (float)random(0, (uint32_t)window->Size.x);
+                    snowflake.Position.y = window->Pos.y;
+                }
+                else
+                    continue;
+            }
+
+            float const phase = 3.141592653589f * (float)snowflake.Lifetime / 1000ms .count();
+            snowflake.Lifetime += (uint32_t)delta.count();
+            snowflake.Position.x += drag.x * 0.1f * (float)(5 + snowflake.Seed % 5) + UI_SCALE * (float)( 5 + snowflake.Seed % 30) * perSecond * std::sin(phase) * (snowflake.Seed % 2 ? 1 : -1);
+            snowflake.Position.y += drag.y * 0.1f * (float)(5 + snowflake.Seed % 5) + UI_SCALE * (float)(20 + snowflake.Seed % 10) * perSecond;
+
+            float size;
+            switch (snowflake.Seed % 10) { case 0: case 1: case 2: case 3: case 4: case 5: size = 1.0f; break; case 6: case 7: case 8: size = 1.5f; break; case 9: size = 2.0f; break; }
+            size *= UI_SCALE;
+            window->DrawList->AddRectFilled(snowflake.Position - ImVec2 { size, size }, snowflake.Position + ImVec2 { size, size }, snowflakeColor, size <= 1.5f ? 0 : size * 2);
+
+            if (snowflake.Position.x < window->Pos.x)
+            {
+                if (resizing)
+                    snowflake.Lifetime = 0;
+                else
+                    snowflake.Position.x += window->Size.x;
+            }
+            if (snowflake.Position.x > window->Pos.x + window->Size.x)
+            {
+                if (resizing)
+                    snowflake.Lifetime = 0;
+                else
+                    snowflake.Position.x -= window->Size.x;
+            }
+            if (snowflake.Position.y < window->Pos.y - 50 ||
+                snowflake.Position.y > window->Pos.y + window->Size.y + 50)
+                snowflake.Lifetime = 0;
+        }
+        prevWindowPos = window->Pos;
+        prevWindowSize = window->Size;
+    }
+    #pragma endregion
+
     if (postAction)
         postAction();
+
+    RenderKeyBindEditor();
 
     ImGui::End();
 }
@@ -1890,7 +2172,7 @@ void Handler::RenderSettings(bool menu)
         }
         ImGui::PopStyleVar();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Opens these settings in a separate window");
+            ImGui::Tooltip("Opens these settings in a separate window");
         ImGui::Separator();
     }
 
@@ -1906,7 +2188,7 @@ void Handler::RenderSettings(bool menu)
         if (ImGui::ButtonEx("Save Builds & Settings", { ImGui::GetContentRegionAvailWidth() - ITEM_SPACING.x - (FRAME_PADDING.x + ImGui::CalcTextSize("Load").x + FRAME_PADDING.x), 0 }, disabled ? ImGuiButtonFlags_Disabled : 0))
             SaveConfig();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Everything is saved automatically when you close Guild Wars 2");
+            ImGui::Tooltip("Everything is saved automatically when you close Guild Wars 2");
         if (disabled)
             ImGui::PopStyleColor();
     }
@@ -1928,13 +2210,10 @@ void Handler::RenderSettings(bool menu)
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { 1, 1 });
 
     if (ImGui::Text("Keybind"), ImGui::SameLine(); ImGui::Button(fmt::format("{}##KeyBindToggleBuilds", m_config.KeyBindToggleBuilds).c_str(), { -1, 0 }))
-    {
-        m_keyBindEdited = m_keyBindToggleBuilds;
-        ImGui::OpenPopup("BuildPad##KeyBindToggleBuilds");
-    }
+        EditKeyBind(m_keyBindToggleBuilds, [this](KeyBind const& keyBind) { m_config.KeyBindToggleBuilds = (m_keyBindToggleBuilds = keyBind).ToString().value_or(""); });
 
     ImGui::PushItemWidth(LINE_SIZE.y * 7);
-    if (int lang = (int)std::distance(API::GetLanguageInfos().begin(), std::find_if(API::GetLanguageInfos().begin(), API::GetLanguageInfos().end(), [tag = API::Instance().GetLanguage()](API::LanguageInfo const& l) { return l.Tag == tag; }));
+    if (int lang = (int)util::distance_if(API::GetLanguageInfos(), util::member_equals(&API::LanguageInfo::Tag, API::Instance().GetLanguage()));
         ImGui::Combo("API Language", &lang, [](void* data, int const index, char const** text) { return *text = API::GetLanguageInfos()[index].Name.c_str(), true; }, nullptr, (int)API::GetLanguageInfos().size()))
     {
         auto itr = API::GetLanguageInfos().begin();
@@ -1943,7 +2222,9 @@ void Handler::RenderSettings(bool menu)
     }
     ImGui::PopItemWidth();
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Some characters might require a custom font to display correctly");
+        ImGui::Tooltip("Some characters might require a custom font to display correctly");
+    static bool snow = [] { time_t t = time(nullptr); tm tm { }; localtime_s(&tm, &t); return tm.tm_mon >= 11 && tm.tm_mday >= 22 || tm.tm_mon <= 0 && tm.tm_mday <= 4; }();
+    if (snow) ImGui::Checkbox("Snow", &m_config.Snow);
     ImGui::Checkbox("Show Filter Panel", &m_config.ShowFilterPanel);
     if (m_config.ShowFilterPanel)
     {
@@ -1954,14 +2235,27 @@ void Handler::RenderSettings(bool menu)
         ImGui::Checkbox("Show Profession Filter", &m_config.ShowProfessionFilter);
         ImGui::Checkbox("Show Search Box", &m_config.ShowNameFilter);
         ImGui::Checkbox("Show Flags", &m_config.ShowFlagsFilter);
-        ImGui::Checkbox("Show Settings Button", &m_config.ShowSettingsButton);
+        if (ImGui::Checkbox("Show Settings Button", &m_config.ShowSettingsButton) && !m_config.ShowSettingsButton && m_config.HideWindowHeader)
+            m_config.HideWindowHeader = false;
+        ImGui::Checkbox("Always Filter Flags Additively", &m_config.SimpleFlagsFilter);
+        if (ImGui::IsItemHovered())
+            ImGui::TooltipWithHeader("Enable to revert to the old flag filtering behavior", "Leaving this disabled allows you to filter builds by intersection between separate groups of flags.\n\nExample:\nIf you're filtering on Raid, Power, Condition flags... \n\nWhen enabled (old behavior): shows builds that have Raid OR Power OR Condition flags (or any combination of those).\n\nWhen disabled (new behavior): shows builds that have both Raid AND either Power OR Condition flags (or both).");
+        ImGui::Checkbox("Clear Filters When Hidden", &m_config.ClearFiltersOnWindowClose);
+        if (ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_WindowBg)).w < 0.75f - 0.01f) // 0.75f in ImGuiExtensions.h, but there is some precision loss in U32<->float conversion
+            ImGui::Checkbox("Less Transparent Buttons", &m_config.LessTransparentButtons);
         if (m_config.HiddenFiltersHintHidden)
             ImGui::Checkbox("Hide warning about active hidden filters", &m_config.HiddenFiltersHintHidden);
         ImGui::Unindent(INDENT_SPACING);
 
         if (!m_config.ShowProfessionFilter && !m_config.ShowNameFilter && !m_config.ShowFlagsFilter)
+        {
             m_config.ShowFilterPanel = false;
+            m_config.ClearFiltersOnWindowClose = false;
+            m_config.LessTransparentButtons = false;
+        }
     }
+    if (!m_config.ShowFilterPanel && m_config.HideWindowHeader)
+        m_config.HideWindowHeader = false;
     ImGui::Checkbox("Use Profession Colors", &m_config.UseProfessionColors);
     if (m_config.UseProfessionColors)
     {
@@ -1969,7 +2263,7 @@ void Handler::RenderSettings(bool menu)
         ImGui::Checkbox("Only When Not My Profession", &m_config.ProfessionColorsUnfilteredOnly);
         if (ImGui::FixedCollapsingHeader("Customize Colors"))
         {
-            ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() - (LINE_SIZE.y + FRAME_PADDING.y * 2) - ITEM_SPACING.x - (LINE_SIZE.y + FRAME_PADDING.y * 2));
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvailWidth() - BUTTON_SIZE.x - ITEM_SPACING.x - BUTTON_SIZE.x);
             for (auto const& info : GW2::GetProfessionInfos())
             {
                 uint32_t& packed = m_config.ProfessionColors[(size_t)info.Profession];
@@ -2006,8 +2300,8 @@ void Handler::RenderSettings(bool menu)
         ImGui::Checkbox("Current Profession First", &m_config.SortBuildsByProfessionCurrentFirst);
         ImGui::Checkbox("Show Profession Icons", &m_config.SortBuildsByProfessionShowIcons);
         ImGui::Checkbox("Show Profession Names", &m_config.SortBuildsByProfessionShowNames);
-        ImGui::PushItemWidth(LINE_SIZE.y * 3);
-        ImGui::DragInt("Profession Spacing", (int*)&m_config.SortBuildsByProfessionSpacing, 0.25f, 0, 50);
+        ImGui::PushItemWidth(LINE_SIZE.y * 5);
+        ImGui::DragInt("Profession Spacing", (int*)&m_config.SortBuildsByProfessionSpacing, 0.25f, 0, 50, "%.0f px");
         ImGui::PopItemWidth();
         ImGui::Unindent(INDENT_SPACING);
     }
@@ -2029,7 +2323,7 @@ void Handler::RenderSettings(bool menu)
             if (info.Separator)
                 columns.emplace_back();
             if (!columns.empty())
-                columns.back() = std::max<float>(columns.back(), ITEM_SPACING.x + LINE_SIZE.y + FRAME_PADDING.y * 2 + ITEM_INNER_SPACING.x + ImGui::CalcTextSize(info.Name.c_str()).x + ITEM_SPACING.x);
+                columns.back() = std::max<float>(columns.back(), ITEM_SPACING.x + BUTTON_SIZE.x + ITEM_INNER_SPACING.x + ImGui::CalcTextSize(info.Name.c_str()).x + ITEM_SPACING.x);
         }
 
         bool columnsStarted = false;
@@ -2064,6 +2358,12 @@ void Handler::RenderSettings(bool menu)
 
     ImGui::Separator();
 
+    ImGui::PushItemWidth(LINE_SIZE.y * 5);
+    if (ImGui::DragInt("UI Scale", (int*)&m_config.UIScale, 1, 20, 500, "%.0f%%"))
+        m_config.UIScale = (m_config.UIScale + 5) / 10 * 10; // Some manual rounding to the nearest 10% step
+    if (ImGui::IsItemHovered())
+        ImGui::Tooltip("Try changing ArcDPS font size first before touching this");
+    ImGui::PopItemWidth();
     ImGui::Checkbox("Lock Window Position", &m_config.LockWindowPosition);
     if (m_config.LockWindowPosition)
     {
@@ -2096,16 +2396,11 @@ void Handler::RenderSettings(bool menu)
     }
     else
         m_config.AutoWindowHeight = false;
+    if (ImGui::Checkbox("Hide Window Header", &m_config.HideWindowHeader) && m_config.HideWindowHeader && (!m_config.ShowFilterPanel || !m_config.ShowSettingsButton))
+        m_config.ShowFilterPanel = m_config.ShowSettingsButton = true;
     ImGui::Checkbox("Keep Window Within Boundaries", &m_config.KeepWindowInBounds);
     if (ImGui::IsItemHovered())
-    {
-        ImGui::BeginTooltip();
-        ImVec4 color = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Text));
-        color.w /= 2;
-        ImGui::Text("Prevent window from leaving the screen boundaries");
-        ImGui::TextColored(color, "Enabling this might move the window undesirably if you change resolution!");
-        ImGui::EndTooltip();
-    }
+        ImGui::TooltipWithHeader("Prevent window from leaving the screen boundaries", "Enabling this might move the window undesirably if you change resolution!");
 
     ImGui::Separator();
 
@@ -2129,10 +2424,33 @@ void Handler::RenderSettings(bool menu)
     if (ImGui::Button(fmt::format("Version {}", m_versionCurrent).c_str(), { -1, 0 }))
         m_aboutShown ^= true;
 
-    ImGui::PopStyleVar();
+    RenderKeyBindEditor();
 
-    if (ImGui::BeginPopupModal("BuildPad##KeyBindToggleBuilds", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    ImGui::PopStyleVar();
+}
+
+void Handler::EditKeyBind(KeyBind const& keyBind, KeyBindCallback&& callback)
+{
+    m_keyBindEditing = true;
+    m_keyBindEdited = keyBind;
+    m_keyBindCallback = std::move(callback);
+    auto const window = ImGui::GetCurrentWindow();
+    if (window)
+        ImGui::GetCurrentContext()->CurrentWindow = window->RootWindow;
+    ImGui::OpenPopup("BuildPad##KeyBindEditor");
+    if (window)
+        ImGui::GetCurrentContext()->CurrentWindow = window;
+}
+
+void Handler::RenderKeyBindEditor()
+{
+    if (!m_keyBindEditing)
+        return;
+
+    ImGui::SetNextWindowSizeConstraints({ 60px + ITEM_SPACING.x + 60px + ITEM_SPACING.x + 60px, 0 }, { 10000px, 10000px });
+    if (ImGui::BeginPopupModal("BuildPad##KeyBindEditor", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
+        ImGui::SetWindowFontScale(UI_SCALE);
         ImGui::CaptureKeyboardFromApp();
 
         KeyBind::key_t foundKey = 0;
@@ -2186,21 +2504,26 @@ void Handler::RenderSettings(bool menu)
             ImGui::PopItemWidth();
         }
 
-        if (ImGui::Button("Clear", { 60, 0 }))
+        ImGui::Checkbox("Pass to Guild Wars 2", &m_keyBindEdited.PassThrough);
+        if (ImGui::IsItemHovered())
+            ImGui::Tooltip("Enable to allow Guild Wars 2 to react to pressed keys");
+
+        if (ImGui::Button("Clear", { 60px, 0 }))
+            m_keyBindEdited = { };
+        if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() + WINDOW_PADDING.x - 60px - ITEM_SPACING.x - 60px); ImGui::Button("OK", { 60px, 0 }))
         {
-            m_keyBindEdited.Control = false;
-            m_keyBindEdited.Alt = false;
-            m_keyBindEdited.Shift = false;
-            m_keyBindEdited.Key = { };
-        }
-        if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() - 60 - ITEM_SPACING.x - 60); ImGui::Button("OK", { 60, 0 }))
-        {
-            m_keyBindToggleBuilds = m_keyBindEdited;
-            m_config.KeyBindToggleBuilds = m_keyBindEdited.ToString().value_or("");
+            if (m_keyBindCallback)
+                m_keyBindCallback(m_keyBindEdited);
+            m_keyBindEditing = false;
+            m_keyBindCallback = { };
             ImGui::CloseCurrentPopup();
         }
-        if (ImGui::SameLine(); ImGui::Button("Cancel", { 60, 0 }))
+        if (ImGui::SameLine(); ImGui::Button("Cancel", { 60px, 0 }))
+        {
+            m_keyBindEditing = false;
+            m_keyBindCallback = { };
             ImGui::CloseCurrentPopup();
+        }
         ImGui::EndPopup();
     }
 }
@@ -2230,7 +2553,7 @@ void Handler::BeginRenderBuildList(GW2::Profession profession, bool& firstVisibl
                 ImGui::PopStyleVar();
                 if (name.empty())
                 {
-                    ImGui::SameLine(0, 2);
+                    ImGui::SameLine(0, 2px);
                     ImGui::SetCursorPosY(ImGui::GetCursorPosY() - FRAME_PADDING.y);
                 }
             }
@@ -2241,7 +2564,7 @@ void Handler::BeginRenderBuildList(GW2::Profession profession, bool& firstVisibl
     firstSorted = false;
 
     if (m_config.SortBuildsByProfession && !singleProfession && m_config.SortBuildsByProfessionShowIcons && !m_config.SortBuildsByProfessionShowNames)
-        ImGui::Indent(LINE_SIZE.y + 2);
+        ImGui::Indent(LINE_SIZE.y + 2px);
 
     if (m_config.UseProfessionColors && (!m_config.ProfessionColorsUnfilteredOnly || !singleProfession))
     {
@@ -2261,27 +2584,435 @@ void Handler::EndRenderBuildList(bool singleProfession) const
         ImGui::PopStyleColor(3);
 
     if (m_config.SortBuildsByProfession && !singleProfession && m_config.SortBuildsByProfessionShowIcons && !m_config.SortBuildsByProfessionShowNames)
-        ImGui::Unindent(LINE_SIZE.y + 2);
+        ImGui::Unindent(LINE_SIZE.y + 2px);
 }
 
-void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMissing, Build* editTarget) const
+template<typename DataType, typename InfoType, typename InfoSourceType, typename APIType>
+void Handler::RenderPaletteBar(PaletteContext<DataType, InfoType, InfoSourceType, APIType> const& context) const
+{
+    if (context.Preload && context.EditTarget)
+        context.Preload();
+
+    ImVec2 typeSize = context.Water ? context.TypeSize : ImVec2 { };
+    uint32_t buttonPerRow = context.BarButtonPerRow ? context.BarButtonPerRow : context.BarButtonCount;
+    uint32_t buttonCount = std::min<uint32_t>(context.BarButtonCount, buttonPerRow);
+    float const width = context.BarVertical
+                        ? (typeSize.x + context.ButtonSize.x * buttonCount)
+                        : (typeSize.x + context.ButtonSize.x * buttonCount + context.BarSpacing + typeSize.x + context.ButtonSize.x * buttonCount);
+    for (uint8_t water = 0; water < (uint8_t)(context.Water ? 2 : 1); ++water)
+    {
+        if (context.Water)
+        {
+            if (context.BarVertical || !water)
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max<float>(0, std::ceil((ImGui::GetContentRegionAvailWidth() - width) / 2)));
+
+            float const offset = (context.ButtonSize.y - typeSize.y) / 2 + (context.EditTarget ? GetIcon(Icons::SelectionChevron).TrimmedSize().y * UI_SCALE : 0);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset);
+            ImGui::Image(GetIcon(water ? Icons::WaterSkills : Icons::LandSkills).Texture, typeSize);
+            ImGui::SameLine(0, 0);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - offset);
+        }
+        for (uint8_t index = 0; index < context.BarButtonCount; ++index)
+        {
+            std::string guid = fmt::format("##Palette{}{}{}", context.Context, water ? "Water" : "Land", index);
+            ImVec2 cursor = ImGui::GetCurrentWindow()->Pos + ImGui::GetCursorPos();
+            bool hovered = ImGui::IsMouseHoveringRect(cursor, cursor + ImVec2 { context.ButtonSize.x, GetIcon(Icons::SelectionChevron).TrimmedSize().y * UI_SCALE + context.ButtonSize.y }) && ImGui::IsMouseHoveringWindow();
+            bool active = ImGui::IsPopupOpenPublic(guid.c_str());
+            float multiplier = context.EditTarget ? (active ? 0.25f : hovered ? 1.0f : 0.8f) : 1.0f;
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
+            ImGui::BeginGroup();
+            if (context.EditTarget)
+            {
+                auto const& icon = GetIcon(Icons::SelectionChevron);
+                ImGui::NewLine();
+                ImGui::SameLine(0, context.ButtonSize.x - icon.TrimmedSize().x * UI_SCALE);
+                ImGui::GetCurrentWindow()->DC.CurrentLineHeight = 0.0f;
+                ImGui::GetCurrentWindow()->DC.CurrentLineTextBaseOffset = 0.0f;
+                ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
+                color.x *= multiplier;
+                color.y *= multiplier;
+                color.z *= multiplier;
+                if (!context.PaletteSourceLoaded)
+                    color.x = color.y = color.z = 0.0f;
+                ImGui::Image(icon.Texture, icon.TrimmedSize() * UI_SCALE, icon.GetUV0(), icon.GetUV1(), color);
+            }
+            {
+                auto const& data = context.Getter(water, index);
+                auto const& id = context.DataToAPITransform(data, water, index);
+                auto const& api = APIType::Get(id);
+                auto const& icon = id ? (context.IconGetter ? context.IconGetter(data, false) : api.*context.APIIcon) : GetIcon(context.MissingAPIIcon);
+                if (index < context.BarButtonCount / 2 ? context.DarkenFirstHalf : context.DarkenSecondHalf)
+                    multiplier *= id ? 0.5f : 0.8f;
+                ImVec4 color { 1.0f, 1.0f, 1.0f, 1.0f };
+                color.x *= multiplier;
+                color.y *= multiplier;
+                color.z *= multiplier;
+                ImGui::Image(icon.Texture, context.ButtonSize, icon.GetUV0(), icon.GetUV1(), color);
+                if (ImGui::IsItemHovered())
+                    ImGui::TooltipWithHeader(api ? (api.*context.APIName).c_str() : nullptr, context.ButtonTooltip.c_str());
+            }
+            ImGui::EndGroup();
+            if (context.EditTarget && context.PaletteSourceLoaded)
+            {
+                if (ImGui::IsItemClicked() || ImGui::IsItemClicked(1))
+                    ImGui::OpenPopup(guid.c_str());
+            }
+            if (ImGui::IsPopupOpenPublic(guid.c_str()))
+            {
+                std::vector<InfoType const*> palette;
+                palette.reserve(context.PaletteSource.size());
+                for (auto const& info : context.PaletteSource)
+                    if (context.PaletteFilter(info, water, index))
+                        palette.push_back(&info);
+
+                if (context.PaletteSorter)
+                    std::sort(palette.begin(), palette.end(), context.PaletteSorter);
+
+                auto const window = ImGui::GetCurrentWindow()->RootWindow;
+                ImVec2 pos
+                {
+                    cursor.x + context.PaletteSize.x / 2 - (WINDOW_PADDING.y + (context.PaletteSize.x + context.PaletteSpacing.x) * std::min<size_t>(palette.size(), context.PalettePerRow) - context.PaletteSpacing.x + WINDOW_PADDING.y) / 2,
+                    cursor.y - (WINDOW_PADDING.y + (context.PaletteSize.x + context.PaletteSpacing.y) * ((palette.size() + context.PalettePerRow - 1) / context.PalettePerRow) - context.PaletteSpacing.y + WINDOW_PADDING.y)
+                };
+                if (pos.y < 0)
+                {
+                    float const y = cursor.y + GetIcon(Icons::SelectionChevron).TrimmedSize().y * UI_SCALE + context.ButtonSize.y;
+                    pos.y = y + (cursor.y - pos.y) < ImGui::GetIO().DisplaySize.y ? y : 0;
+                }
+                ImGui::SetNextWindowPos(pos, ImGuiSetCond_Always);
+                if (ImGui::BeginPopup(guid.c_str()))
+                {
+                    ImGui::SetWindowFontScale(UI_SCALE);
+                    std::optional<DataType> selection;
+                    size_t const paletteSlots = palette.size() < context.PalettePerRow
+                                                ? palette.size()
+                                                : (palette.size() + context.PalettePerRow - 1) / context.PalettePerRow * context.PalettePerRow;
+                    for (size_t i = 0; i < paletteSlots; ++i)
+                    {
+                        size_t paletteIndex = i;
+                        if (context.PaletteReverse && !palette.empty())
+                            paletteIndex = (palette.size() - 1) / context.PalettePerRow * context.PalettePerRow - i / context.PalettePerRow * context.PalettePerRow + i % context.PalettePerRow;
+
+                        if (paletteIndex < palette.size())
+                        {
+                            auto const& info = *palette[paletteIndex];
+                            auto const& data = context.InfoToDataTransform(info);
+                            auto const& id = context.DataToAPITransform(data, water, index);
+                            auto const& api = APIType::Get(id);
+                            auto const& icon = id ? (context.IconGetter ? context.IconGetter(data, true) : api.*context.APIIcon) : GetIcon(context.MissingAPIIcon);
+                            cursor = ImGui::GetCurrentWindow()->Pos + ImGui::GetCursorPos();
+                            hovered = ImGui::IsMouseHoveringRect(cursor, cursor + context.PaletteSize) && ImGui::IsMouseHoveringWindow();
+                            active = id && context.PaletteActive(info, water, index);
+                            bool const usable = !context.PaletteUsable || context.PaletteUsable(info, water, index);
+                            multiplier = context.EditTarget ? (active ? (hovered ? 0.33f : 0.25f) : hovered ? 1.0f : 0.8f) : 1.0f;
+                            ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
+                            color.x *= multiplier;
+                            color.y *= multiplier;
+                            color.z *= multiplier;
+                            if (!usable)
+                                color = { 0.25f, 0.0f, 0.0f, color.w };
+                            ImGui::Image(icon.Texture, context.PaletteSize, icon.GetUV0(), icon.GetUV1(), color);
+                            if (ImGui::IsItemHovered() && api)
+                                ImGui::TooltipWithHeader((api.*context.APIName).c_str(), !usable ? "Unavailable" : nullptr);
+                            if (ImGui::IsItemClicked() && usable)
+                                selection = data;
+                        }
+                        else
+                            ImGui::ItemSize(context.PaletteSize);
+
+                        if ((i + 1) % context.PalettePerRow)
+                            ImGui::SameLine(0, context.PaletteSpacing.x);
+                        else if (i + 1 != paletteSlots)
+                            ImGui::ItemSize(context.PaletteSpacing);
+                    }
+
+                    if (selection)
+                    {
+                        // Hack to prevent modal window from closing
+                        ImGui::CloseCurrentPopup();
+                        ImGui::FocusWindow(window);
+                        window->WasActive = false;
+
+                        if (auto link = ChatLink::Decode(context.EditTarget->GetLink()); link && std::holds_alternative<ChatLink::BuildTemplate>(*link))
+                        {
+                            auto& data = std::get<ChatLink::BuildTemplate>(*link);
+                            context.Setter(data, water, index, *selection);
+                            context.EditTarget->SetLink(ChatLink::Encode(data));
+                        }
+                    }
+                    ImGui::EndPopup();
+                }
+            }
+            ImGui::PopStyleVar();
+            if (!((index + 1) % buttonPerRow) && index + 1 != context.BarButtonCount)
+            {
+                if (context.BarVertical || !water)
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max<float>(0, std::ceil((ImGui::GetContentRegionAvailWidth() - width) / 2)));
+                ImGui::ItemSize(typeSize);
+            }
+            ImGui::SameLine(0, 0);
+        }
+
+        if (context.BarVertical)
+            ImGui::NewLine();
+        else
+            ImGui::SameLine(0, context.BarSpacing);
+    }
+    if (!context.BarVertical)
+        ImGui::NewLine();
+}
+
+bool Handler::BuildEditContext::IsChanged()
+{
+    auto const& original = GetOriginal();
+    auto const& editTarget = GetEditTarget();
+
+    return original.GetName() != editTarget.GetName()
+        || original.GetLink() != editTarget.GetLink();
+}
+
+void Handler::BuildEditContext::RevertChanges()
+{
+    auto const& original = GetOriginal();
+    auto& editTarget = GetEditTarget();
+
+    editTarget.SetName(original.GetName());
+    editTarget.SetLink(original.GetLink());
+}
+
+Build const& Handler::BuildEditContext::GetOriginal()
+{
+    return BuildStorageEditedBuild ? BuildStorage::Instance().GetEditTargetBuild() : Original;
+}
+
+Build& Handler::BuildEditContext::GetEditTarget()
+{
+    return BuildStorageEditedBuild ? BuildStorage::Instance().GetEditedBuild() : TemporaryEditTarget;
+}
+
+void Handler::RenderBuildEditor(BuildEditContext& context) const
+{
+    Build& editTarget = context.GetEditTarget();
+
+    if (editTarget.GetLink().empty())
+        editTarget.SetLink(ChatLink::Encode(ChatLink::BuildTemplate { }));
+
+    bool open = true;
+    float extraSpace;
+    switch (editTarget.GetParsedProfession())
+    {
+        case GW2::Profession::Ranger:
+            extraSpace = 40px;
+            break;
+        case GW2::Profession::Revenant:
+            extraSpace = 40px + 40px + 32px;
+            break;
+        default:
+            extraSpace = 0px;
+            break;
+    }
+    ImGui::SetNextWindowSizeConstraints({ 250px, 600px + extraSpace }, { 10000px, 10000px });
+    ImGui::SetNextWindowPosCenter(ImGuiSetCond_Appearing);
+    ImGui::Begin(fmt::format("BuildPad##EditBuild{}", context.WindowID).c_str(), &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::SetWindowFontScale(UI_SCALE);
+
+    ImGui::PushItemWidth(-1);
+    auto buffer = util::to_buffer(editTarget.GetName());
+    if (ImGui::InputText("##EditBuildEditName", buffer.data(), buffer.size()))
+        editTarget.SetName(buffer.data());
+    ImGui::PopItemWidth();
+
+    if (editTarget.GetName().empty())
+    {
+        ImGui::SameLine(0, 0);
+        ImVec4 color = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Text));
+        color.w /= 4;
+        ImGui::SameLine(-1, 1 + FRAME_PADDING.x);
+        ImGui::TextColored(color, "Build Name");
+    }
+
+    ImGui::PushItemWidth(-1);
+    buffer = util::to_buffer(editTarget.GetLink());
+    if (ImGui::InputText("##EditBuildEditLink", buffer.data(), buffer.size(), ImGuiInputTextFlags_AutoSelectAll))
+        editTarget.SetLink(buffer.data());
+    ImGui::PopItemWidth();
+
+    if (editTarget.GetLink().empty())
+    {
+        ImGui::SameLine(0, 0);
+        ImVec4 color = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Text));
+        color.w /= 4;
+        ImGui::SameLine(-1, 1 + FRAME_PADDING.x);
+        ImGui::TextColored(color, "Chat Link");
+    }
+
+    Build::ParsedInfo const& parsed = editTarget.GetParsedInfo();
+    if (!parsed.Error.empty())
+    {
+        ImGui::NewLine();
+        ImGui::SameLine(-1, 1 + FRAME_PADDING.x);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - ITEM_SPACING.y / 2);
+        ImGui::TextColored({ 1.0f, 0.0f, 0.0f, 1.0f }, "%s", parsed.Error.c_str());
+    }
+
+    if (!parsed.Info.empty())
+    {
+        ImVec4 color = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Text));
+        color.w /= 2;
+        ImGui::NewLine();
+        ImGui::SameLine(-1, 1 + FRAME_PADDING.x);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - ITEM_SPACING.y / 2);
+        ImGui::TextColored(color, "%s", parsed.Info.c_str());
+    }
+
+    // TODO: Add flags
+
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Border)), "Preview:");
+    if (context.IsChanged())
+    {
+        ImGui::SameLine(0, 0);
+        ImGui::SameLine(0, ImGui::GetContentRegionAvailWidth() - BUTTON_SIZE.x);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (BUTTON_SIZE.y - LINE_SIZE.y) + ITEM_SPACING.y);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
+        bool on = true;
+        if (TextureData const& icon = GetIcon(Icons::ClearSearch);
+            ImGui::CheckboxImage(icon.Texture, "##ResetPreviewBuild", &on, icon.GetUV0(), icon.GetUV1(), 0.4f, 0.6f, 0.5f, 0.9f, 1.0f, 0.95f))
+            context.RevertChanges();
+        if (ImGui::IsItemHovered())
+            ImGui::Tooltip("Revert manual changes");
+        ImGui::PopStyleVar();
+    }
+    ImGui::Separator();
+    ImGui::BeginChild("Preview##EditBuild", { 0, -(ITEM_SPACING.y + BUTTON_SIZE.y) });
+    ImGui::SetWindowFontScale(UI_SCALE);
+    RenderBuildTooltip(editTarget, false, false, &editTarget, true);
+    ImGui::EndChild();
+
+    ImGui::NewLine();
+    if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() + WINDOW_PADDING.x - 60px - ITEM_SPACING.x - 60px); ImGui::Button("OK", { 60, 0 }))
+    {
+        BuildStorage& storage = BuildStorage::Instance();
+        if (Build* build = BuildStorage::Instance().FindBuild(context.ID))
+        {
+            // If we're currently editing that build - change the edited build instead of the original,
+            // to prevent confusion with what changes can be accepted or cancelled
+            if (storage.IsEditingBuild(*build))
+                build = &storage.GetEditedBuild();
+
+            build->SetName(editTarget.GetName());
+            build->SetLink(editTarget.GetLink());
+        }
+        open = false;
+    }
+    if (ImGui::SameLine(); ImGui::Button("Cancel", { 60px, 0 }))
+    {
+        context.RevertChanges();
+        open = false;
+    }
+    ImGui::End();
+
+    context.Closed = !open;
+}
+
+void Handler::RenderBuildEditors()
+{
+    for (BuildEditContext& context : m_editedBuilds)
+        RenderBuildEditor(context);
+
+    m_editedBuilds.remove_if(util::member_equals(&BuildEditContext::Closed, true));
+}
+
+void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMissing, Build* editTarget, bool allowChangeProfession) const
 {
     API::Instance().PreloadAllBuildInfos(build);
 
     auto const& parsed = build.GetParsedInfo();
 
+    ImGui::PushTextWrapPos(std::max<float>(ImGui::GetContentRegionAvailWidth(), ImGui::GetCurrentWindow()->Flags & ImGuiWindowFlags_AlwaysAutoResize ? 400px : 50px));
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(0xFF44BBEE), "%s", fmt::format("{}", build.GetName()).c_str());
+    ImGui::PopTextWrapPos();
     if (parsed.SkillsLand || parsed.SkillsWater || parsed.TraitLines)
     {
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
-        ImGui::Image(GetIcon(build.GetParsedSpecialization()).Texture, { 32, 32 });
-        ImGui::SameLine(0, 3);
 
-        auto const& info = GW2::GetSpecializationInfo(build.GetParsedSpecialization());
+        float offset = 0;
+        if (editTarget && allowChangeProfession)
+        {
+            PaletteContext<GW2::Profession, GW2::ProfessionInfo, decltype(GW2::GetProfessionInfos()), API::Profession> context { "Profession", GW2::GetProfessionInfos(), &API::Profession::Name, &API::Profession::Icon };
+            context.EditTarget = editTarget;
+            context.Preload = [] { API::Instance().PreloadAllProfessions(); };
+            context.Getter = [&parsed](bool water, uint8_t index) { return parsed.Profession; };
+            context.Setter = [](ChatLink::BuildTemplate& data, bool water, uint8_t index, GW2::Profession selection)
+            {
+                if (std::exchange(data.Profession, selection) != selection)
+                {
+                    data.ProfessionSpecific.Raw = { };
+                    data.Specializations = { };
+                    data.Skills = { };
+                }
+            };
+            context.PaletteSourceLoaded = true;
+            context.PaletteFilter = [](GW2::ProfessionInfo const& info, bool water, uint8_t index)
+            {
+                return info.Profession != GW2::Profession::None;
+            };
+            context.PaletteActive = [&parsed](GW2::ProfessionInfo const& info, bool water, uint8_t index)
+            {
+                return parsed.Profession == info.Profession;
+            };
+            context.PaletteSorter = [](GW2::ProfessionInfo const* a, GW2::ProfessionInfo const* b)
+            {
+                static std::array<GW2::Profession, 9> const professions
+                {
+                    GW2::Profession::Warrior,
+                    GW2::Profession::Guardian,
+                    GW2::Profession::Revenant,
+                    GW2::Profession::Ranger,
+                    GW2::Profession::Thief,
+                    GW2::Profession::Engineer,
+                    GW2::Profession::Necromancer,
+                    GW2::Profession::Elementalist,
+                    GW2::Profession::Mesmer,
+                };
+                return std::find(professions.begin(), professions.end(), a->Profession)
+                     < std::find(professions.begin(), professions.end(), b->Profession);
+            };
+            context.MissingAPIIcon = Icons::MissingProfession;
+            context.IconGetter = [this, &parsed](GW2::Profession const& selection, bool palette) -> TextureData const&
+            {
+                return palette
+                    ? GetIcon(selection)
+                    : parsed.Specialization != GW2::Specialization::None
+                    ? GetIcon(parsed.Specialization)
+                    : GetIcon(parsed.Profession);
+            };
+            context.InfoToDataTransform = [](GW2::ProfessionInfo const& info) { return info.Profession; };
+            context.DataToAPITransform = [](GW2::Profession selection, bool water, uint8_t index) { return (uint32_t)selection; };
+            context.Water = false;
+            context.BarVertical = false;
+            context.BarSpacing = 0px;
+            context.BarButtonCount = 1;
+            context.ButtonSize = { 32px, 32px };
+            context.ButtonSpacing = 0px;
+            context.PaletteSize = { 32px, 32px };
+            context.PaletteSpacing = { 4px, 4px };
+            context.PalettePerRow = 3;
+            context.ButtonTooltip = "Click to change profession";
+            RenderPaletteBar(context);
+
+            offset += GetIcon(Icons::SelectionChevron).TrimmedSize().y * UI_SCALE;
+        }
+        else
+            ImGui::Image((parsed.Specialization != GW2::Specialization::None ? GetIcon(parsed.Specialization) : GetIcon(parsed.Profession)).Texture, { 32px, 32px });
+
+        ImGui::SameLine(0, 3px);
+
+        auto const& info = GW2::GetSpecializationInfo(parsed.Specialization);
         std::string const text = fmt::format((parsed.SkillsLand || parsed.SkillsWater) && parsed.TraitLines ? "{} Build" : parsed.TraitLines ? "{} Traits" : "{} Skills", info.Elite ? info.Name : GW2::GetProfessionInfo(build.GetParsedProfession()).Name);
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::ceil((32 - ImGui::CalcTextSize(text.c_str()).y) / 2));
+        offset += std::ceil((32px - ImGui::CalcTextSize(text.c_str()).y) / 2);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset);
         ImGui::TextColored({ 1.0f, 1.0f, 1.0f, 0.5f }, "%s", text.c_str());
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - std::ceil((32 - ImGui::CalcTextSize(text.c_str()).y) / 2));
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - offset);
         ImGui::PopStyleVar();
     }
 
@@ -2292,50 +3023,112 @@ void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMiss
     }
     else if (parsed.SkillsLand || parsed.SkillsWater)
     {
+        PaletteContext<uint32_t, SkillStorage::Skill*, std::vector<SkillStorage::Skill*>, API::Skill> context { "Skill", SkillStorage::Instance().GetProfessionSkills(parsed.Profession), &API::Skill::Name, &API::Skill::Icon };
+        context.EditTarget = parsed.TraitLines ? editTarget : nullptr;
+        context.Preload = [&] { API::Instance().PreloadAllProfessionSkills(parsed.Profession); };
+        context.Getter = [&](bool water, uint8_t index)
+        {
+            if (parsed.Profession == GW2::Profession::Revenant && index >= 5)
+            {
+                if (index >= 6 && index <= 8)
+                    return (water ? parsed.RevenantInactiveSkillsWater : parsed.RevenantInactiveSkillsLand)[index - 6];
+
+                index -= 5;
+            }
+
+            return (water ? *parsed.SkillsWater : *parsed.SkillsLand)[index];
+        };
+        context.Setter = [&](ChatLink::BuildTemplate& data, bool water, uint8_t index, uint32_t selection)
+        {
+            if (parsed.Profession == GW2::Profession::Revenant && index >= 5)
+            {
+                if (index >= 6 && index <= 8)
+                {
+                    index -= 6;
+
+                    if (selection)
+                        for (uint8_t i = 0; i < 3; ++i)
+                            if (data.ProfessionSpecific.Revenant.InactiveSkills.Select(water)[i] == selection)
+                                data.ProfessionSpecific.Revenant.InactiveSkills.Select(water)[i] = data.ProfessionSpecific.Revenant.InactiveSkills.Select(water)[index];
+
+                    data.ProfessionSpecific.Revenant.InactiveSkills.Select(water)[index] = selection;
+                    return;
+                }
+
+                index -= 5;
+            }
+
+            if (selection)
+                for (uint8_t i = 0; i < 5; ++i)
+                    if (data.Skills[i].Select(water) == selection)
+                        data.Skills[i].Select(water) = data.Skills[index].Select(water);
+
+            data.Skills[index].Select(water) = selection;
+        };
+        context.PaletteSourceLoaded = API::Profession::Get((uint32_t)parsed.Profession);
+        context.PaletteFilter = [&](SkillStorage::Skill* const& info, bool water, uint8_t index)
+        {
+            if (info->Specialization != GW2::Specialization::None &&
+                info->Specialization != parsed.Specialization)
+                return false;
+
+            if (info->Palettes.empty())
+                return false;
+
+            if (parsed.Profession == GW2::Profession::Revenant &&
+                info->ID != SkillStorage::Instance().FromPalette(info->Palettes.front(), (water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[parsed.Profession == GW2::Profession::Revenant && index >= 5 ? 1 : 0]))
+                return false;
+
+            if (parsed.Profession == GW2::Profession::Revenant && index >= 5)
+                index -= 5;
+
+            switch (index)
+            {
+                case 0: return info->Type == SkillStorage::SkillType::Heal;
+                case 1:
+                case 2:
+                case 3: return info->Type == SkillStorage::SkillType::Utility;
+                case 4: return info->Type == SkillStorage::SkillType::Elite;
+                default: return false;
+            }
+        };
+        context.PaletteActive = [&](SkillStorage::Skill* const& info, bool water, uint8_t index) -> bool
+        {
+            if (parsed.Profession == GW2::Profession::Revenant && index >= 6 && index <= 8)
+                return util::find_if(water ? parsed.RevenantInactiveSkillsWater : parsed.RevenantInactiveSkillsLand, util::equals(info->ToPalette()));
+
+            return util::find_if(water ? *parsed.SkillsWater : *parsed.SkillsLand, util::equals(info->ToPalette()));
+        };
+        context.PaletteUsable = [&](SkillStorage::Skill* const& info, bool water, uint8_t index)
+        {
+            if (parsed.Profession == GW2::Profession::Revenant)
+                return true;
+
+            if (water)
+                if (auto const& skill = API::Skill::Get(info->ID))
+                    return !skill.NoUnderwater;
+
+            return true;
+        };
+        context.MissingAPIIcon = Icons::MissingSkill;
+        context.InfoToDataTransform = [&](SkillStorage::Skill* const& info) { return info->ToPalette(); };
+        context.DataToAPITransform = [&](uint32_t selection, bool water, uint8_t index) { return SkillStorage::Instance().FromPalette(selection, (water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[parsed.Profession == GW2::Profession::Revenant && index >= 5 ? 1 : 0]); };
+        context.Water = true;
+        context.DarkenSecondHalf = parsed.Profession == GW2::Profession::Revenant;
+        context.TypeSize = { 24px, 24px };
+        context.BarVertical = true;
+        context.BarSpacing = 10px;
+        context.BarButtonCount = parsed.Profession == GW2::Profession::Revenant ? 10 : 5;
+        context.BarButtonPerRow = 5;
+        context.ButtonSize = { 40px, 40px };
+        context.ButtonSpacing = 0px;
+        context.PaletteSize = { 45px, 45px };
+        context.PaletteSpacing = { 5px, 5px };
+        context.PalettePerRow = 4;
+        context.PaletteReverse = true;
+        context.ButtonTooltip = "Click to change skill";
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
-        ImGui::NewLine();
-
-        float x = ImGui::GetCursorPosX();
-        ImGui::SameLine(0, std::max<float>(0, std::ceil((ImGui::GetContentRegionAvailWidth() - (24 + 40 + 40 + 40 + 40 + 40)) / 2)));
-        if (parsed.SkillsLand)
-        {
-            x = ImGui::GetCursorPosX();
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (40 - 24) / 2);
-            ImGui::Image(GetIcon(Icons::LandSkills).Texture, { 24, 24 });
-            ImGui::SameLine(0, 0);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (40 - 24) / 2);
-            for (uint32_t skill : *parsed.SkillsLand)
-            {
-                auto const& info = API::Skill::Get(SkillPaletteToSkill(skill, parsed.RevenantLegendsLand[0]));
-                auto const& icon = skill && info.ID ? info.Icon : GetIcon(Icons::MissingSkill);
-                ImGui::Image(icon.Texture, { 40, 40 }, icon.GetUV0(), icon.GetUV1());
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", info.Name.c_str());
-                ImGui::SameLine(0, 0);
-            }
-            ImGui::NewLine();
-        }
-
-        if (x != 0)
-            ImGui::SetCursorPosX(x);
-        if (parsed.SkillsWater)
-        {
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (40 - 24) / 2);
-            ImGui::Image(GetIcon(Icons::WaterSkills).Texture, { 24, 24 });
-            ImGui::SameLine(0, 0);
-            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (40 - 24) / 2);
-            for (uint32_t skill : *parsed.SkillsWater)
-            {
-                auto const& info = API::Skill::Get(SkillPaletteToSkill(skill, parsed.RevenantLegendsWater[0]));
-                auto const& icon = skill && info.ID ? info.Icon : GetIcon(Icons::MissingSkill);
-                ImGui::Image(icon.Texture, { 40, 40 }, icon.GetUV0(), icon.GetUV1());
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", info.Name.c_str());
-                ImGui::SameLine(0, 0);
-            }
-            ImGui::NewLine();
-        }
-
+        RenderPaletteBar(context);
         ImGui::PopStyleVar();
         ImGui::Spacing();
     }
@@ -2351,298 +3144,111 @@ void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMiss
         {
             case GW2::Profession::Ranger:
             {
-                if (editTarget)
-                    API::Instance().PreloadAllPets();
-
-                static ImVec2 const TYPE_SIZE { 16, 16 };
-                static ImVec2 const PET_SIZE { 40, 40 };
-                static float const PET_SPACING = 16;
-                static ImVec2 const PET_SELECTION_SIZE { 56, 56 };
-                static float const PET_SELECTION_SPACING = 0;
-                static uint8_t const MAX_PETS_PER_ROW = 6;
-
-                ImGui::Spacing();
-                ImGui::SameLine(0, std::max<float>(0, std::ceil((ImGui::GetContentRegionAvailWidth() - (TYPE_SIZE.x + PET_SIZE.x * 2 + PET_SPACING + TYPE_SIZE.x + PET_SIZE.x * 2)) / 2)));
-                for (uint8_t water = 0; water < 2; ++water)
+                PaletteContext<uint8_t, Pet, decltype(m_pets), API::Pet> context { "RangerPet", m_pets, &API::Pet::Name, &API::Pet::Icon };
+                context.EditTarget = editTarget;
+                context.Preload = [] { API::Instance().PreloadAllPets(); };
+                context.Getter = [&parsed](bool water, uint8_t index) { return (water ? parsed.RangerPetsWater : parsed.RangerPetsLand)[index]; };
+                context.Setter = [](ChatLink::BuildTemplate& data, bool water, uint8_t index, uint8_t selection)
                 {
-                    float const offset = (PET_SIZE.y - TYPE_SIZE.y) / 2 + (editTarget ? GetIcon(Icons::SelectionChevron).TrimmedSize().y : 0);
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset);
-                    ImGui::Image(GetIcon(water ? Icons::WaterSkills : Icons::LandSkills).Texture, TYPE_SIZE);
-                    ImGui::SameLine(0, 0);
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - offset);
-                    for (uint8_t i = 0; i < 2; ++i)
-                    {
-                        std::string const guid = fmt::format("##RangerPetSelection{}{}", water ? "Water" : "Land", i);
-                        ImVec2 cursor = ImGui::GetCurrentWindow()->Pos + ImGui::GetCursorPos();
-                        bool hovered = ImGui::IsMouseHoveringRect(cursor, cursor + ImVec2 { PET_SIZE.x, GetIcon(Icons::SelectionChevron).TrimmedSize().y + PET_SIZE.y }) && ImGui::IsMouseHoveringWindow();
-                        bool active = ImGui::IsPopupOpenPublic(guid.c_str());
-                        float multiplier = editTarget ? (active ? 0.25f : hovered ? 1.0f : 0.8f) : 1.0f;
-                        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
-                        ImGui::BeginGroup();
-                        if (editTarget)
-                        {
-                            auto const& icon = GetIcon(Icons::SelectionChevron);
-                            ImGui::NewLine();
-                            ImGui::SameLine(0, PET_SIZE.x - icon.TrimmedSize().x);
-                            ImGui::GetCurrentWindow()->DC.CurrentLineHeight = 0.0f;
-                            ImGui::GetCurrentWindow()->DC.CurrentLineTextBaseOffset = 0.0f;
-                            ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
-                            color.x *= multiplier;
-                            color.y *= multiplier;
-                            color.z *= multiplier;
-                            ImGui::Image(icon.Texture, icon.TrimmedSize(), icon.GetUV0(), icon.GetUV1(), color);
-                        }
-                        {
-                            auto const& id = (water ? parsed.RangerPetsWater : parsed.RangerPetsLand)[i];
-                            auto const& pet = API::Pet::Get(id);
-                            auto const& icon = id ? pet.Icon : GetIcon(Icons::MissingPet);
-                            ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
-                            color.x *= multiplier;
-                            color.y *= multiplier;
-                            color.z *= multiplier;
-                            ImGui::Image(icon.Texture, PET_SIZE, icon.GetUV0(), icon.GetUV1(), color);
-                            if (ImGui::IsItemHovered())
-                            {
-                                ImGui::BeginTooltip();
-                                color = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Text));
-                                color.w /= 2;
-                                if (pet)
-                                    ImGui::Text("%s", pet.Name.c_str());
-                                ImGui::TextColored(color, "Click to change pet");
-                                ImGui::EndTooltip();
-                            }
-                        }
-                        ImGui::EndGroup();
-                        if (editTarget && m_petsLoaded)
-                        {
-                            auto window = ImGui::GetCurrentWindow()->RootWindow;
-                            if (ImGui::IsItemClicked() || ImGui::IsItemClicked(1))
-                                ImGui::OpenPopup(guid.c_str());
+                    if (selection && data.ProfessionSpecific.RangerPets.Select(water)[1 - index] == selection)
+                        data.ProfessionSpecific.RangerPets.Select(water)[1 - index] = data.ProfessionSpecific.RangerPets.Select(water)[index];
 
-                            std::vector<Pet const*> list;
-                            list.reserve(m_pets.size());
-                            util::transform_if(m_pets.begin(), m_pets.end(), std::back_inserter(list),
-                                [&](Pet const& info)
-                            {
-                                if (!water && info.Type != Pet::PetType::Terrestrial && info.Type != Pet::PetType::Amphibious)
-                                    return false;
+                    data.ProfessionSpecific.RangerPets.Select(water)[index] = selection;
+                };
+                context.PaletteSourceLoaded = m_petsLoaded;
+                context.PaletteFilter = [](Pet const& info, bool water, uint8_t index)
+                {
+                    if (!water && info.Type != Pet::PetType::Terrestrial && info.Type != Pet::PetType::Amphibious)
+                        return false;
 
-                                if (water && info.Type != Pet::PetType::Aquatic && info.Type != Pet::PetType::Amphibious)
-                                    return false;
+                    if (water && info.Type != Pet::PetType::Aquatic && info.Type != Pet::PetType::Amphibious)
+                        return false;
 
-                                return true;
-                            }, [](Pet const& info) { return &info; });
-                            ImVec2 pos =
-                            {
-                                cursor.x + PET_SIZE.x / 2 - (1 + WINDOW_PADDING.y + (PET_SELECTION_SIZE.x + PET_SELECTION_SPACING) * std::min<size_t>(list.size(), MAX_PETS_PER_ROW) - PET_SELECTION_SPACING + WINDOW_PADDING.y + 1) / 2,
-                                cursor.y - (1 + WINDOW_PADDING.y + (PET_SELECTION_SIZE.x + PET_SELECTION_SPACING) * ((list.size() + MAX_PETS_PER_ROW - 1) / MAX_PETS_PER_ROW) - PET_SELECTION_SPACING + WINDOW_PADDING.y + 1)
-                            };
-                            if (pos.y < 0)
-                                pos.y = 0;
-                            ImGui::SetNextWindowPos(pos, ImGuiSetCond_Always);
-                            if (ImGui::BeginPopup(guid.c_str()))
-                            {
-                                std::optional<uint8_t> selection;
-                                uint32_t j = 0;
-                                for (auto const& ptr : list)
-                                {
-                                    auto const& info = *ptr;
-                                    auto const& pet = API::Pet::Get(info.ID);
-                                    auto const& icon = info.ID ? pet.Icon : GetIcon(Icons::MissingPet);
-                                    cursor = ImGui::GetCurrentWindow()->Pos + ImGui::GetCursorPos();
-                                    hovered = ImGui::IsMouseHoveringRect(cursor, cursor + PET_SELECTION_SIZE) && ImGui::IsMouseHoveringWindow();
-                                    active = info.ID && (water ? parsed.RangerPetsWater : parsed.RangerPetsLand)[1 - i] == info.ID || (water ? parsed.RangerPetsWater : parsed.RangerPetsLand)[i] == info.ID;
-                                    multiplier = editTarget ? (active ? 0.25f : hovered ? 1.0f : 0.8f) : 1.0f;
-                                    ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
-                                    color.x *= multiplier;
-                                    color.y *= multiplier;
-                                    color.z *= multiplier;
-                                    ImGui::Image(icon.Texture, PET_SELECTION_SIZE, icon.GetUV0(), icon.GetUV1(), color);
-                                    if (ImGui::IsItemHovered() && pet)
-                                        ImGui::SetTooltip("%s", pet.Name.c_str());
-                                    if (ImGui::IsItemClicked())
-                                        selection = info.ID;
-                                    if (++j % MAX_PETS_PER_ROW)
-                                        ImGui::SameLine(0, PET_SELECTION_SPACING);
-                                    else
-                                        ImGui::InvisibleButton("", { PET_SELECTION_SPACING, PET_SELECTION_SPACING });
-                                }
-
-                                if (selection)
-                                {
-                                    // Hack to prevent modal window from closing
-                                    ImGui::CloseCurrentPopup();
-                                    ImGui::FocusWindow(window);
-                                    window->WasActive = false;
-
-                                    if (!*selection || (water ? parsed.RangerPetsWater : parsed.RangerPetsLand)[1 - i] != selection)
-                                    {
-                                        if (auto link = ChatLink::Decode(editTarget->GetLink()); link && std::holds_alternative<ChatLink::BuildTemplate>(*link))
-                                        {
-                                            auto& data = std::get<ChatLink::BuildTemplate>(*link);
-                                            (water ? data.ProfessionSpecific.RangerPets.Water : data.ProfessionSpecific.RangerPets.Land)[i] = *selection;
-                                            editTarget->SetLink(ChatLink::Encode(data));
-                                        }
-                                    }
-                                }
-                                ImGui::EndPopup();
-                            }
-                        }
-                        ImGui::PopStyleVar();
-                        ImGui::SameLine(0, 0);
-                    }
-                    ImGui::SameLine(0, 10);
-                }
-                ImGui::NewLine();
+                    return true;
+                };
+                context.PaletteActive = [&parsed](Pet const& info, bool water, uint8_t index)
+                {
+                    return (water ? parsed.RangerPetsWater : parsed.RangerPetsLand)[1 - index] == info.ID
+                        || (water ? parsed.RangerPetsWater : parsed.RangerPetsLand)[    index] == info.ID;
+                };
+                context.MissingAPIIcon = Icons::MissingPet;
+                context.InfoToDataTransform = [](Pet const& info) { return info.ID; };
+                context.DataToAPITransform = [](uint8_t selection, bool water, uint8_t index) { return selection; };
+                context.Water = true;
+                context.TypeSize = { 16px, 16px };
+                context.BarVertical = false;
+                context.BarSpacing = 10px;
+                context.BarButtonCount = 2;
+                context.ButtonSize = { 40px, 40px };
+                context.ButtonSpacing = 0px;
+                context.PaletteSize = { 56px, 56px };
+                context.PaletteSpacing = { 0px, 0px };
+                context.PalettePerRow = 6;
+                context.ButtonTooltip = "Click to change pet";
+                ImGui::Spacing();
+                RenderPaletteBar(context);
                 break;
             }
             case GW2::Profession::Revenant:
             {
-                static ImVec2 const TYPE_SIZE { 16, 16 };
-                static ImVec2 const LEGEND_SIZE { 32, 32 };
-                static float const LEGEND_SPACING = 16;
-                static ImVec2 const LEGEND_SELECTION_SIZE { 45, 45 };
-                static float const LEGEND_SELECTION_SPACING = 5;
-                static uint8_t const MAX_LEGENDS_PER_ROW = 4;
-
-                ImGui::Spacing();
-                ImGui::SameLine(0, std::max<float>(0, std::ceil((ImGui::GetContentRegionAvailWidth() - (TYPE_SIZE.x + LEGEND_SIZE.x * 2 + LEGEND_SPACING + TYPE_SIZE.x + LEGEND_SIZE.x * 2)) / 2)));
-                for (uint8_t water = 0; water < 2; ++water)
+                PaletteContext<GW2::RevenantLegend, GW2::RevenantLegendInfo, decltype(GW2::GetRevenantLegendInfos()), API::Skill> context { "RevenantLegend", GW2::GetRevenantLegendInfos(), &API::Skill::Name, &API::Skill::Icon };
+                context.EditTarget = editTarget;
+                context.Getter = [&parsed](bool water, uint8_t index) { return (water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[1 - index]; };
+                context.Setter = [](ChatLink::BuildTemplate& data, bool water, uint8_t index, GW2::RevenantLegend selection)
                 {
-                    float const offset = (LEGEND_SIZE.y - TYPE_SIZE.y) / 2 + (editTarget ? GetIcon(Icons::SelectionChevron).TrimmedSize().y : 0);
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset);
-                    ImGui::Image(GetIcon(water ? Icons::WaterSkills : Icons::LandSkills).Texture, TYPE_SIZE);
-                    ImGui::SameLine(0, 0);
-                    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - offset);
-                    for (uint8_t i = 0; i < 2; ++i)
+                    if (selection != GW2::RevenantLegend::None && data.ProfessionSpecific.Revenant.Legends.Select(water)[index] == selection)
+                        data.ProfessionSpecific.Revenant.Legends.Select(water)[index] = data.ProfessionSpecific.Revenant.Legends.Select(water)[1 - index];
+
+                    data.ProfessionSpecific.Revenant.Legends.Select(water)[1 - index] = selection;
+                };
+                context.PaletteSourceLoaded = true;
+                context.PaletteFilter = [&parsed](GW2::RevenantLegendInfo const& info, bool water, uint8_t index)
+                {
+                    return info.RequiredSpecialization == GW2::Specialization::None || info.RequiredSpecialization == parsed.Specialization;
+                };
+                context.PaletteActive = [&parsed](GW2::RevenantLegendInfo const& info, bool water, uint8_t index)
+                {
+                    return info.Legend != GW2::RevenantLegend::None
+                        && ((water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[    index] == info.Legend
+                        ||  (water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[1 - index] == info.Legend);
+                };
+                context.PaletteSorter = [](GW2::RevenantLegendInfo const* a, GW2::RevenantLegendInfo const* b)
+                {
+                    static std::array<GW2::RevenantLegend, 7> const legends
                     {
-                        std::string const guid = fmt::format("##RevenantLegendSelection{}{}", water ? "Water" : "Land", 1 - i);
-                        ImVec2 cursor = ImGui::GetCurrentWindow()->Pos + ImGui::GetCursorPos();
-                        bool hovered = ImGui::IsMouseHoveringRect(cursor, cursor + ImVec2 { LEGEND_SIZE.x, GetIcon(Icons::SelectionChevron).TrimmedSize().y + LEGEND_SIZE.y }) && ImGui::IsMouseHoveringWindow();
-                        bool active = ImGui::IsPopupOpenPublic(guid.c_str());
-                        float multiplier = editTarget ? (active ? 0.25f : hovered ? 1.0f : 0.8f) : 1.0f;
-                        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
-                        ImGui::BeginGroup();
-                        if (editTarget)
-                        {
-                            auto const& icon = GetIcon(Icons::SelectionChevron);
-                            ImGui::NewLine();
-                            ImGui::SameLine(0, LEGEND_SIZE.x - icon.TrimmedSize().x);
-                            ImGui::GetCurrentWindow()->DC.CurrentLineHeight = 0.0f;
-                            ImGui::GetCurrentWindow()->DC.CurrentLineTextBaseOffset = 0.0f;
-                            ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
-                            color.x *= multiplier;
-                            color.y *= multiplier;
-                            color.z *= multiplier;
-                            ImGui::Image(icon.Texture, icon.TrimmedSize(), icon.GetUV0(), icon.GetUV1(), color);
-                        }
-                        {
-                            auto const& info = GW2::GetRevenantLegendInfo((water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[1 - i]);
-                            auto const& skill = API::Skill::Get(info.SwapSkill);
-                            auto const& icon = info.Legend != GW2::RevenantLegend::None ? skill.Icon : GetIcon(Icons::MissingSkill);
-                            ImVec4 color = i || info.Legend == GW2::RevenantLegend::None ? ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f } : ImVec4 { 0.5f, 0.5f, 0.5f, 1.0f };
-                            color.x *= multiplier;
-                            color.y *= multiplier;
-                            color.z *= multiplier;
-                            ImGui::Image(icon.Texture, LEGEND_SIZE, icon.GetUV0(), icon.GetUV1(), color);
-                            if (ImGui::IsItemHovered())
-                            {
-                                ImGui::BeginTooltip();
-                                color = ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Text));
-                                color.w /= 2;
-                                if (skill)
-                                    ImGui::Text("%s", skill.Name.c_str());
-                                ImGui::TextColored(color, "Click to change legend");
-                                ImGui::EndTooltip();
-                            }
-                        }
-                        ImGui::EndGroup();
-                        if (editTarget)
-                        {
-                            auto window = ImGui::GetCurrentWindow()->RootWindow;
-                            if (ImGui::IsItemClicked() || ImGui::IsItemClicked(1))
-                                ImGui::OpenPopup(guid.c_str());
-
-                            std::vector<GW2::RevenantLegendInfo const*> list;
-                            list.reserve(GW2::GetRevenantLegendInfos().size());
-                            util::transform_if(GW2::GetRevenantLegendInfos().begin(), GW2::GetRevenantLegendInfos().end(), std::back_inserter(list),
-                                [&](GW2::RevenantLegendInfo const& info)
-                                {
-                                    if (GW2::GetSpecializationInfo(editTarget->GetParsedSpecialization()).Elite &&
-                                        info.RequiredSpecialization != GW2::Specialization::None &&
-                                        info.RequiredSpecialization != editTarget->GetParsedSpecialization())
-                                        return false;
-
-                                    if (!water && !info.Terrestrial)
-                                        return false;
-
-                                    if (water && !info.Aquatic)
-                                        return false;
-
-                                    return true;
-                                }, [](GW2::RevenantLegendInfo const& info) { return &info; });
-                            ImVec2 pos =
-                            {
-                                cursor.x + LEGEND_SIZE.x / 2 - (1 + WINDOW_PADDING.y + (LEGEND_SELECTION_SIZE.x + LEGEND_SELECTION_SPACING) * std::min<size_t>(list.size(), MAX_LEGENDS_PER_ROW) - LEGEND_SELECTION_SPACING + WINDOW_PADDING.y + 1) / 2,
-                                cursor.y - (1 + WINDOW_PADDING.y + (LEGEND_SELECTION_SIZE.x + LEGEND_SELECTION_SPACING) * ((list.size() + MAX_LEGENDS_PER_ROW - 1) / MAX_LEGENDS_PER_ROW) - LEGEND_SELECTION_SPACING + WINDOW_PADDING.y + 1)
-                            };
-                            if (pos.y < 0)
-                                pos.y = 0;
-                            ImGui::SetNextWindowPos(pos, ImGuiSetCond_Always);
-                            if (ImGui::BeginPopup(guid.c_str()))
-                            {
-                                std::optional<GW2::RevenantLegend> selection;
-                                uint32_t j = 0;
-                                for (auto const& ptr : list)
-                                {
-                                    auto const& info = *ptr;
-                                    auto const& skill = API::Skill::Get(info.SwapSkill);
-                                    auto const& icon = info.Legend != GW2::RevenantLegend::None ? skill.Icon : GetIcon(Icons::MissingSkill);
-                                    cursor = ImGui::GetCurrentWindow()->Pos + ImGui::GetCursorPos();
-                                    hovered = ImGui::IsMouseHoveringRect(cursor, cursor + LEGEND_SELECTION_SIZE) && ImGui::IsMouseHoveringWindow();
-                                    active = info.Legend != GW2::RevenantLegend::None && (water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[i] == info.Legend || (water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[1 - i] == info.Legend;
-                                    multiplier = editTarget ? (active ? 0.25f : hovered ? 1.0f : 0.8f) : 1.0f;
-                                    ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
-                                    color.x *= multiplier;
-                                    color.y *= multiplier;
-                                    color.z *= multiplier;
-                                    ImGui::Image(icon.Texture, LEGEND_SELECTION_SIZE, icon.GetUV0(), icon.GetUV1(), color);
-                                    if (ImGui::IsItemHovered() && skill)
-                                        ImGui::SetTooltip("%s", skill.Name.c_str());
-                                    if (ImGui::IsItemClicked())
-                                        selection = info.Legend;
-                                    if (++j % MAX_LEGENDS_PER_ROW)
-                                        ImGui::SameLine(0, LEGEND_SELECTION_SPACING);
-                                    else
-                                        ImGui::InvisibleButton("", { LEGEND_SELECTION_SPACING, LEGEND_SELECTION_SPACING });
-                                }
-
-                                if (selection)
-                                {
-                                    // Hack to prevent modal window from closing
-                                    ImGui::CloseCurrentPopup();
-                                    ImGui::FocusWindow(window);
-                                    window->WasActive = false;
-
-                                    if (selection == GW2::RevenantLegend::None || (water ? parsed.RevenantLegendsWater : parsed.RevenantLegendsLand)[i] != selection)
-                                    {
-                                        if (auto link = ChatLink::Decode(editTarget->GetLink()); link && std::holds_alternative<ChatLink::BuildTemplate>(*link))
-                                        {
-                                            auto& data = std::get<ChatLink::BuildTemplate>(*link);
-                                            (water ? data.ProfessionSpecific.RevenantLegends.Water : data.ProfessionSpecific.RevenantLegends.Land)[1 - i] = *selection;
-                                            editTarget->SetLink(ChatLink::Encode(data));
-                                        }
-                                    }
-                                }
-                                ImGui::EndPopup();
-                            }
-                        }
-                        ImGui::PopStyleVar();
-                        ImGui::SameLine(0, 0);
-                    }
-                    ImGui::SameLine(0, 10);
-                }
-                ImGui::NewLine();
+                        GW2::RevenantLegend::Jallis,
+                        GW2::RevenantLegend::Mallix,
+                        GW2::RevenantLegend::Ventari,
+                        GW2::RevenantLegend::Shiro,
+                        GW2::RevenantLegend::Glint,
+                        GW2::RevenantLegend::Kalla,
+                        GW2::RevenantLegend::None,
+                    };
+                    return std::find(legends.begin(), legends.end(), a->Legend)
+                         < std::find(legends.begin(), legends.end(), b->Legend);
+                };
+                context.PaletteUsable = [&](GW2::RevenantLegendInfo const& info, bool water, uint8_t index)
+                {
+                    return water ? info.Aquatic : info.Terrestrial;
+                };
+                context.MissingAPIIcon = Icons::MissingSkill;
+                context.InfoToDataTransform = [](GW2::RevenantLegendInfo const& info) { return info.Legend; };
+                context.DataToAPITransform = [](GW2::RevenantLegend selection, bool water, uint8_t index) { return SkillStorage::Instance().GetRevenantLegendSwapSkill(selection); };
+                context.Water = true;
+                context.DarkenFirstHalf = true;
+                context.TypeSize = { 16px, 16px };
+                context.BarVertical = false;
+                context.BarSpacing = 16px;
+                context.BarButtonCount = 2;
+                context.ButtonSize = { 32px, 32px };
+                context.ButtonSpacing = 0px;
+                context.PaletteSize = { 45px, 45px };
+                context.PaletteSpacing = { 5px, 5px };
+                context.PalettePerRow = 4;
+                context.PaletteReverse = true;
+                context.ButtonTooltip = "Click to change legend";
+                ImGui::Spacing();
+                RenderPaletteBar(context);
                 break;
             }
             default:
@@ -2652,6 +3258,7 @@ void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMiss
 
     if (parsed.TraitLines)
     {
+        uint8_t lineIndex = 0;
         for (auto const& line : *parsed.TraitLines)
         {
             auto const& info = API::Specialization::Get((uint32_t)line.Specialization);
@@ -2661,13 +3268,13 @@ void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMiss
             {
                 auto const& traitInfo = API::Trait::Get(info.WeaponTrait);
                 auto const& icon = traitInfo.Icon;
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::ceil((24 - ImGui::CalcTextSize(text.c_str()).y) / 2));
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::ceil((24px - ImGui::CalcTextSize(text.c_str()).y) / 2));
                 ImGui::TextColored({ 1.0f, 1.0f, 1.0f, 0.5f }, "%s", text.c_str());
                 ImGui::SameLine(0, 5);
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - std::ceil((24 - ImGui::CalcTextSize(text.c_str()).y) / 2));
-                ImGui::Image(icon.Texture, { 24, 24 }, icon.GetUV0(), icon.GetUV1());
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - std::ceil((24px - ImGui::CalcTextSize(text.c_str()).y) / 2));
+                ImGui::Image(icon.Texture, { 24px, 24px }, icon.GetUV0(), icon.GetUV1());
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", traitInfo.Name.c_str());
+                    ImGui::Tooltip(traitInfo.Name.c_str());
             }
             else
                 ImGui::TextColored({ 1.0f, 1.0f, 1.0f, 0.5f }, "%s", text.c_str());
@@ -2677,14 +3284,80 @@ void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMiss
                 continue;
 
             {
-                auto const& icon = info && info.Icon ? *info.Icon : GetIcon(Icons::MissingSpecialization);
-                ImGui::SameLine(0, std::max<float>(0, std::ceil((ImGui::GetContentRegionAvailWidth() - (48 + 5 + 24 + 5 + 24 + 5 + 24)) / 2)));
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (24 * 3 - 48) / 2);
-                ImGui::Image(icon.Texture, { 48, 48 }, icon.GetUV0(), icon.GetUV1());
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", (info ? info.Name : "Empty").c_str());
+                float const height = 48px + (parsed.SkillsLand && parsed.SkillsWater && editTarget ? GetIcon(Icons::SelectionChevron).TrimmedSize().y * UI_SCALE * 2 : 0);
+                ImGui::SameLine(0, std::max<float>(0, std::ceil((ImGui::GetContentRegionAvailWidth() - (48px + 5px + 24px + 5px + 24px + 5px + 24px)) / 2)));
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (24px * 3 - height) / 2);
+
+                PaletteContext<GW2::Specialization, GW2::Specialization, decltype(API::Profession::Specializations), API::Specialization> context { fmt::format("Specialization{0}", lineIndex), API::Profession::Get((uint32_t)parsed.Profession).Specializations, &API::Specialization::Name, &API::Specialization::Icon };
+                context.EditTarget = parsed.SkillsLand && parsed.SkillsWater ? editTarget : nullptr;
+                context.Preload = [&] { API::Instance().PreloadAllProfessionSpecializations(parsed.Profession); };
+                context.Getter = [&](bool water, uint8_t index) { return (*parsed.TraitLines)[lineIndex].Specialization; };
+                context.Setter = [&](ChatLink::BuildTemplate& data, bool water, uint8_t index, GW2::Specialization selection)
+                {
+                    if (selection != GW2::Specialization::None)
+                        for (uint8_t i = 0; i < 3; ++i)
+                            if (data.Specializations[i].Specialization == selection && i != lineIndex)
+                            {
+                                std::swap(data.Specializations[i], data.Specializations[lineIndex]);
+                                // Clear if this is an elite specialization (can't be swapped with anything, as it can only reside in last line)
+                                if (GW2::GetSpecializationInfo(data.Specializations[i].Specialization).Elite)
+                                    data.Specializations[i] = ChatLink::BuildTemplate::SpecializationData { };
+                            }
+
+                    if (std::exchange(data.Specializations[lineIndex].Specialization, selection) != selection)
+                        data.Specializations[lineIndex].Trait0 = data.Specializations[lineIndex].Trait1 = data.Specializations[lineIndex].Trait2 = 0;
+
+                    // Clear skills and legends when switching away from an elite specialization
+                    GW2::Specialization const oldSpecialization = parsed.Specialization;
+                    GW2::Specialization const newSpecialization = data.Specializations[2].Specialization;
+                    if (oldSpecialization != newSpecialization && GW2::GetSpecializationInfo(oldSpecialization).Elite)
+                    {
+                        if (data.Profession == GW2::Profession::Revenant)
+                        {
+                            for (uint8_t type = 0; type < 2; ++type)
+                                for (auto& legend : data.ProfessionSpecific.Revenant.Legends.Select((bool)type))
+                                    if (legend != GW2::RevenantLegend::None)
+                                        if (GW2::Specialization const legendSpec = GW2::GetRevenantLegendInfo(legend).RequiredSpecialization; legendSpec != GW2::Specialization::None && legendSpec != newSpecialization)
+                                            legend = GW2::RevenantLegend::None;
+                        }
+                        else
+                        {
+                            for (uint8_t type = 0; type < 2; ++type)
+                                for (auto& skill : data.Skills)
+                                    if (uint16_t& palette = skill.Select((bool)type))
+                                        if (GW2::Specialization const skillSpec = SkillStorage::Instance().GetPaletteSpecialization(palette, data.ProfessionSpecific.Revenant.Legends.Select((bool)type)[0]); GW2::GetSpecializationInfo(skillSpec).Elite && skillSpec != newSpecialization)
+                                            palette = 0;
+                        }
+                    }
+                };
+                context.PaletteSourceLoaded = API::Profession::Get((uint32_t)parsed.Profession);
+                context.PaletteFilter = [&lineIndex](GW2::Specialization const& info, bool water, uint8_t index)
+                {
+                    return lineIndex == 2 || !GW2::GetSpecializationInfo(info).Elite;
+                };
+                context.PaletteActive = [&parsed](GW2::Specialization const& info, bool water, uint8_t index)
+                {
+                    return util::find_if(*parsed.TraitLines, util::member_equals(&Build::ParsedInfo::TraitLine::Specialization, info));
+                };
+                context.MissingAPIIcon = Icons::MissingSpecialization;
+                context.InfoToDataTransform = [](GW2::Specialization const& info) { return info; };
+                context.DataToAPITransform = [](GW2::Specialization selection, bool water, uint8_t index) { return (uint32_t)selection; };
+                context.Water = false;
+                context.BarVertical = false;
+                context.BarSpacing = 0px;
+                context.BarButtonCount = 1;
+                context.ButtonSize = { 48px, 48px };
+                context.ButtonSpacing = 0px;
+                context.PaletteSize = { 48px, 48px };
+                context.PaletteSpacing = { 0px, 0px };
+                context.PalettePerRow = 5;
+                context.ButtonTooltip = "Click to change specialization";
+                ImGui::BeginChild(fmt::format("SpecializationContainer{}", lineIndex).c_str(), { 48px, height });
+                RenderPaletteBar(context);
+                ImGui::EndChild();
+
                 ImGui::SameLine();
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (24 * 3 - 48) / 2);
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (24px * 3 - height) / 2);
             }
 
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
@@ -2693,27 +3366,56 @@ void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMiss
                 if (i % 3 == 0)
                 {
                     if (i)
-                        ImGui::SameLine(0, 5);
+                        ImGui::SameLine(0, 5px);
                     ImGui::BeginGroup();
                 }
 
                 if (!info)
                 {
                     auto const& icon = GetIcon(Icons::MissingTrait);
-                    ImGui::Image(icon.Texture, { 24, 24 }, icon.GetUV0(), icon.GetUV1());
+                    ImGui::Image(icon.Texture, { 24px, 24px }, icon.GetUV0(), icon.GetUV1());
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Locked");
+                        ImGui::Tooltip("Locked");
                 }
                 else if (uint32_t const trait = info.MajorTraits[i])
                 {
                     auto const& traitInfo = API::Trait::Get(trait);
                     auto const& icon = trait ? traitInfo.Icon : GetIcon(Icons::LoadingTrait);
-                    ImGui::Image(icon.Texture, { 24, 24 }, icon.GetUV0(), icon.GetUV1(), line.Traits[i / 3] == (i % 3) + 1 ? ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f } : ImVec4 { 0.25f, 0.25f, 0.25f, 1.0f });
+                    ImVec2 cursor = ImGui::GetCurrentWindow()->Pos + ImGui::GetCursorPos();
+                    bool hovered = ImGui::IsMouseHoveringRect(cursor, cursor + ImVec2 { 24px, 24px }) && ImGui::IsMouseHoveringWindow();
+                    float multiplier = editTarget ? (hovered ? 1.0f : 0.8f) : 1.0f;
+                    multiplier *= line.Traits[i / 3] == i % 3 + 1 ? 1.0f : 0.25f;
+                    ImVec4 color = ImVec4 { 1.0f, 1.0f, 1.0f, 1.0f };
+                    color.x *= multiplier;
+                    color.y *= multiplier;
+                    color.z *= multiplier;
+                    ImGui::Image(icon.Texture, { 24px, 24px }, icon.GetUV0(), icon.GetUV1(), color);
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("%s", traitInfo.Name.c_str());
+                    {
+                        if (editTarget)
+                            ImGui::TooltipWithHeader(traitInfo.Name.c_str(), "Click to change trait");
+                        else
+                            ImGui::Tooltip(traitInfo.Name.c_str());
+                    }
+                    if (ImGui::IsItemClicked() && editTarget)
+                    {
+                        if (auto link = ChatLink::Decode(editTarget->GetLink()); link && std::holds_alternative<ChatLink::BuildTemplate>(*link))
+                        {
+                            auto& data = std::get<ChatLink::BuildTemplate>(*link);
+                            auto& specialization = data.Specializations[lineIndex];
+                            uint8_t value = i % 3 + 1;
+                            switch (i / 3)
+                            {
+                                case 0: specialization.Trait0 = value; break;
+                                case 1: specialization.Trait1 = value; break;
+                                case 2: specialization.Trait2 = value; break;
+                            }
+                            editTarget->SetLink(ChatLink::Encode(data));
+                        }
+                    }
                 }
                 else
-                    ImGui::ItemSize({ 24, 24 });
+                    ImGui::ItemSize({ 24px, 24px });
 
                 if (i % 3 == 2)
                 {
@@ -2723,6 +3425,8 @@ void Handler::RenderBuildTooltip(Build const& build, bool footer, bool errorMiss
                     ImGui::EndGroup();
                 }
             }
+
+            ++lineIndex;
         }
     }
     else if (errorMissing)
@@ -2776,11 +3480,17 @@ void Handler::RenderArcDPSMigration(Time const& delta)
         if (a.GetParsedSpecialization() != b.GetParsedSpecialization() && GW2::GetSpecializationInfo(a.GetParsedSpecialization()).Elite && GW2::GetSpecializationInfo(b.GetParsedSpecialization()).Elite)
             return false;
 
+        // Don't allow combining elite spec skills with other traits of a different elite spec or none at all
+        Build const& traits = a.GetParsedInfo().TraitLines ? a : b;
+        Build const& skills = a.GetParsedInfo().SkillsLand || a.GetParsedInfo().SkillsWater ? a : b;
+        if (GW2::GetSpecializationInfo(skills.GetParsedSpecialization()).Elite && traits.GetParsedSpecialization() != skills.GetParsedSpecialization())
+            return false;
+
         Build test { 0 };
         test.SetLink(a.GetLink());
         test.SetSecondaryLink(b.GetLink());
         auto& savedBuilds = BuildStorage::Instance().GetBuilds();
-        if (auto const itr = std::find_if(savedBuilds.begin(), savedBuilds.end(), [&test](Build const& b) { return b.GetLink() == test.GetLink(); }); itr != savedBuilds.end())
+        if (util::find_if(savedBuilds, util::method_equals(&Build::GetLink, test.GetLink())))
         {
             if (outUniquenessTestFailed)
                 *outUniquenessTestFailed = true;
@@ -2839,7 +3549,7 @@ void Handler::RenderArcDPSMigration(Time const& delta)
                     test.SetName(traits.GetName());
                     test.SetLink(traits.GetLink());
                     test.SetSecondaryLink(skills.GetLink());
-                    if (auto itr = std::find_if(convertedBuilds.begin(), convertedBuilds.end(), [&test](Build const& b) { return b.GetLink() == test.GetLink() && b.GetName() == test.GetName(); }); itr != convertedBuilds.end())
+                    if (util::find_if(convertedBuilds, [&test](Build const& b) { return b.GetLink() == test.GetLink() && b.GetName() == test.GetName(); }))
                         continue;
 
                     convertedBuilds.emplace_back(test);
@@ -2858,14 +3568,14 @@ void Handler::RenderArcDPSMigration(Time const& delta)
         ImGui::PushStyleColor(ImGuiCol_Text, color);
         ImGui::ImageButtonWithText(GetIcon(Icons::AcceptBuildEdit), fmt::format("{} Build{} Converted!", convertedBuildsSuccessCount, convertedBuildsSuccessCount != 1 ? "s" : "").c_str(), { 0, 0 }, 0, -1, { 0, 0, 0, 0 }, { 1.0f, 1.0f, 1.0f, color.w });
         ImGui::PopStyleColor(4);
-        if (std::find_if(m_arcdpsTraits.begin(), m_arcdpsTraits.end(), [](Build const& build) { return build.GetParsedProfession() == GW2::Profession::Ranger; }) != m_arcdpsTraits.end() ||
-            std::find_if(m_arcdpsSkills.begin(), m_arcdpsSkills.end(), [](Build const& build) { return build.GetParsedProfession() == GW2::Profession::Ranger; }) != m_arcdpsSkills.end())
+        if (util::find_if(m_arcdpsTraits, util::method_equals(&Build::GetParsedProfession, GW2::Profession::Ranger)) ||
+            util::find_if(m_arcdpsSkills, util::method_equals(&Build::GetParsedProfession, GW2::Profession::Ranger)))
         {
             ImGui::Spacing();
             ImGui::TextWrapped("Ranger builds will not be converted automatically due to missing information about selected pets.");
         }
-        if (std::find_if(m_arcdpsTraits.begin(), m_arcdpsTraits.end(), [](Build const& build) { return build.GetParsedProfession() == GW2::Profession::Revenant; }) != m_arcdpsTraits.end() ||
-            std::find_if(m_arcdpsSkills.begin(), m_arcdpsSkills.end(), [](Build const& build) { return build.GetParsedProfession() == GW2::Profession::Revenant; }) != m_arcdpsSkills.end())
+        if (util::find_if(m_arcdpsTraits, util::method_equals(&Build::GetParsedProfession, GW2::Profession::Revenant)) ||
+            util::find_if(m_arcdpsSkills, util::method_equals(&Build::GetParsedProfession, GW2::Profession::Revenant)))
         {
             ImGui::Spacing();
             ImGui::TextWrapped("Revenant builds will not be converted automatically due to missing information about selected legends.");
@@ -2960,6 +3670,7 @@ void Handler::RenderArcDPSMigration(Time const& delta)
                     else if (m_tooltipShown)
                     {
                         ImGui::BeginTooltip();
+                        ImGui::SetWindowFontScale(UI_SCALE);
                         if (exists)
                             ImGui::Text("You already have a build with this combination of traits and skills saved");
                         else if (incompatible)
@@ -3001,6 +3712,7 @@ void Handler::RenderArcDPSMigration(Time const& delta)
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (ImGui::GetContentRegionAvailWidth() - ImGui::CalcTextSize("Traits").x) / 2);
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(0xFF44BBEE), "Traits");
     ImGui::BeginChild("Traits##ArcDPSMigration", { 0, 0 });
+    ImGui::SetWindowFontScale(UI_SCALE);
     buildList(m_arcdpsTraits, false);
     ImGui::EndChild();
     ImGui::NextColumn();
@@ -3008,11 +3720,13 @@ void Handler::RenderArcDPSMigration(Time const& delta)
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (ImGui::GetContentRegionAvailWidth() - ImGui::CalcTextSize("Skills").x) / 2);
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(0xFF44BBEE), "Skills");
     ImGui::BeginChild("Skills##ArcDPSMigration", { 0, 0 });
+    ImGui::SetWindowFontScale(UI_SCALE);
     buildList(m_arcdpsSkills, true);
     ImGui::EndChild();
     ImGui::NextColumn();
 
     ImGui::BeginChild("PreviewHeader##ArcDPSMigration", { 0, -1 });
+    ImGui::SetWindowFontScale(UI_SCALE);
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (ImGui::GetContentRegionAvailWidth() - ImGui::CalcTextSize("Combined Build").x) / 2);
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(0xFF44BBEE), "Combined Build");
     if (selectionChanged)
@@ -3067,16 +3781,22 @@ void Handler::RenderArcDPSMigration(Time const& delta)
                 if (auto link = ChatLink::Decode(previewBuild.GetLink()); link && std::holds_alternative<ChatLink::BuildTemplate>(*link))
                 {
                     auto& data = std::get<ChatLink::BuildTemplate>(*link);
-                    data.ProfessionSpecific.RevenantLegends.Land[0] = previousRevenantLegendsLand[0];
-                    data.ProfessionSpecific.RevenantLegends.Land[1] = previousRevenantLegendsLand[1];
-                    data.ProfessionSpecific.RevenantLegends.Water[0] = previousRevenantLegendsWater[0];
-                    data.ProfessionSpecific.RevenantLegends.Water[1] = previousRevenantLegendsWater[1];
+                    data.ProfessionSpecific.Revenant.Legends.Land[0] = previousRevenantLegendsLand[0];
+                    data.ProfessionSpecific.Revenant.Legends.Land[1] = previousRevenantLegendsLand[1];
+                    data.ProfessionSpecific.Revenant.Legends.Water[0] = previousRevenantLegendsWater[0];
+                    data.ProfessionSpecific.Revenant.Legends.Water[1] = previousRevenantLegendsWater[1];
+                    for (uint8_t water = 0; water < 2; ++water)
+                        for (uint8_t i = 0; i < 3; ++i)
+                            if (!data.ProfessionSpecific.Revenant.InactiveSkills.Select((bool)water)[i])
+                                data.ProfessionSpecific.Revenant.InactiveSkills.Select((bool)water)[i] = data.Skills[1 + i].Select((bool)water);
                     previewBuild.SetLink(ChatLink::Encode(data));
                 }
                 break;
             default:
                 break;
         }
+
+        previewBuild.SetSaved();
     }
 
     ImGui::PushItemWidth(-1);
@@ -3121,7 +3841,7 @@ void Handler::RenderArcDPSMigration(Time const& delta)
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color);
     }
 
-    if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() - FRAME_PADDING.x - ImGui::CalcTextSize("Save").x - FRAME_PADDING.x, 0);
+    if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() - 1 - FRAME_PADDING.x - ImGui::CalcTextSize("Save").x - FRAME_PADDING.x, 0);
         ImGui::ButtonEx("Save##ArcDPSMigrationEditName", { 0, 0 }, disabled ? ImGuiButtonFlags_Disabled : 0))
     {
         Build& build = BuildStorage::Instance().AddBuild();
@@ -3141,16 +3861,35 @@ void Handler::RenderArcDPSMigration(Time const& delta)
         ImGui::PopStyleColor(3);
 
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(ImGui::GetColorU32(ImGuiCol_Border)), "Preview:");
+    if (previewBuild.IsSaveNeeded())
+    {
+        ImGui::SameLine(0, 0);
+        ImGui::SameLine(0, ImGui::GetContentRegionAvailWidth() - BUTTON_SIZE.x);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (BUTTON_SIZE.y - LINE_SIZE.y) + ITEM_SPACING.y);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { 0, 0 });
+        bool on = true;
+        if (TextureData const& icon = GetIcon(Icons::ClearSearch);
+            ImGui::CheckboxImage(icon.Texture, "##ResetPreviewBuild", &on, icon.GetUV0(), icon.GetUV1(), 0.4f, 0.6f, 0.5f, 0.9f, 1.0f, 0.95f))
+        {
+            previewBuild.SetLink({});
+            selectionChanged = true;
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::Tooltip("Revert manual changes");
+        ImGui::PopStyleVar();
+    }
     ImGui::Separator();
     ImGui::GetCurrentWindowRead()->Size.y = ImGui::GetCursorPosY();
     ImGui::EndChild();
     ImGui::BeginChild("Preview##ArcDPSMigration", { 0, 0 });
+    ImGui::SetWindowFontScale(UI_SCALE);
     RenderBuildTooltip(previewBuild, false, true, &previewBuild);
     ImGui::EndChild();
     ImGui::Columns(1);
 
     if (ImGui::BeginPopupModal("BuildPad##ArcDPSMigrationAutoConfirm", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
+        ImGui::SetWindowFontScale(UI_SCALE);
         ImGui::Text("The following builds will be saved:");
 
         for (Build const& build : convertedBuilds)
@@ -3159,7 +3898,7 @@ void Handler::RenderArcDPSMigration(Time const& delta)
             ImGui::CheckboxImage(GetIcon(build.GetParsedSpecialization()).Texture, fmt::format("{}", build.GetName()).c_str(), &on, { 0.0625f, 0.0625f }, { 0.9375f, 0.9375f }, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
         }
         ImGui::NewLine();
-        if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() - 60 - ITEM_SPACING.x - 60); ImGui::Button("OK", { 60, 0 }))
+        if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() + WINDOW_PADDING.x - 60px - ITEM_SPACING.x - 60px); ImGui::Button("OK", { 60, 0 }))
         {
             for (Build const& converted : convertedBuilds)
             {
@@ -3171,16 +3910,17 @@ void Handler::RenderArcDPSMigration(Time const& delta)
             convertedBuildsSuccessCount = convertedBuilds.size();
             ImGui::CloseCurrentPopup();
         }
-        if (ImGui::SameLine(); ImGui::Button("Cancel", { 60, 0 }))
+        if (ImGui::SameLine(); ImGui::Button("Cancel", { 60px, 0 }))
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
     if (ImGui::BeginPopupModal("BuildPad##ArcDPSMigrationAutoNone", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
+        ImGui::SetWindowFontScale(UI_SCALE);
         ImGui::Text("No new builds were found that aren't already saved.");
 
         ImGui::NewLine();
-        if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() - 60); ImGui::Button("Close", { 60, 0 }))
+        if (ImGui::SameLine(ImGui::GetContentRegionAvailWidth() + WINDOW_PADDING.x - 60px); ImGui::Button("Close", { 60px, 0 }))
             ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -3192,9 +3932,84 @@ void Handler::RenderArcDPSGear(Time const& delta)
     using legendary_t = ArcDPSLegendaryTemplate;
     static decltype(m_arcdpsGear)::const_pointer selection;
 
+    struct ItemStatsIconsInfo
+    {
+        std::string Name;
+        bool Items = true;
+        std::optional<TextureData> Atlas;
+        uint32_t IconWidth;
+        uint32_t IconHeight;
+        struct IconInfo
+        {
+            std::optional<TextureData> Icon;
+            uint32_t OffsetX = 0;
+            uint32_t OffsetY = 0;
+        };
+        std::map<uint32_t, IconInfo> Icons;
+        std::map<uint32_t, uint32_t> StatsLUT;
+
+        [[nodiscard]] std::optional<TextureData> GetIcon(uint32_t stats) const
+        {
+            if (auto const itr = StatsLUT.find(stats); itr != StatsLUT.end())
+                stats = itr->second;
+
+            if (auto const itr = Icons.find(stats); itr != Icons.end())
+            {
+                auto const& info = itr->second;
+                if (auto const& icon = info.Icon ? info.Icon : Atlas)
+                    return TextureData { *icon }.Trim(info.OffsetX, info.OffsetY, icon->Width - info.OffsetX - IconWidth, icon->Height - info.OffsetY - IconHeight);
+            }
+            return { };
+        }
+    };
+    static std::list<ItemStatsIconsInfo> iconSets;
+    static bool iconSetsInited = false;
+    if (!iconSetsInited)
+    {
+        iconSetsInited = true;
+        iconSets.emplace_back();
+        Web::Instance().Request("https://buildpad.gw2archive.eu/itemstatsicons.json", [this](std::string_view const data)
+        {
+            for (auto const& icons : nlohmann::json::parse(data.begin(), data.end(), nullptr, false))
+            {
+                auto& info = iconSets.emplace_back();
+                info.Name = icons["name"];
+                info.Items = icons["items"];
+                info.IconWidth = icons["width"];
+                info.IconHeight = icons["height"];
+                if (icons.contains("atlas"))
+                    Web::Instance().Request(icons["atlas"], [this, &info](std::string_view const data) { info.Atlas = LoadTexture(std::pair { data.data(), data.size() }); });
+
+                for (auto const& stats : icons["stats"])
+                {
+                    uint32_t firstID = 0;
+                    for (auto const& id : stats["ids"])
+                    {
+                        if (!firstID)
+                            firstID = id;
+
+                        info.StatsLUT[id] = firstID;
+                    }
+
+                    if (firstID)
+                    {
+                        auto& icon = info.Icons[firstID];
+                        if (stats.contains("x"))
+                            icon.OffsetX = stats["x"];
+                        if (stats.contains("y"))
+                            icon.OffsetX = stats["y"];
+                        if (stats.contains("icon"))
+                            Web::Instance().Request(stats["icon"], [this, &icon](std::string_view const data) { icon.Icon = LoadTexture(std::pair { data.data(), data.size() }); });
+                    }
+                }
+            }
+        });
+    }
+
     ImGui::Columns(2);
 
     ImGui::BeginChild("Gear##ArcDPSGear", { 0, 0 });
+    ImGui::SetWindowFontScale(UI_SCALE);
     bool firstVisibleTemplate = true;
     for (auto const& info : GW2::GetProfessionInfos())
     {
@@ -3259,7 +4074,8 @@ void Handler::RenderArcDPSGear(Time const& delta)
     ImGui::EndChild();
     ImGui::NextColumn();
 
-    ImGui::BeginChild("Preview##ArcDPSGear", { 0, 0 });
+    ImGui::BeginChild("Preview##ArcDPSGear", { 0, iconSets.size() > 1 ? -(ITEM_SPACING.y + BUTTON_SIZE.y) : 0 });
+    ImGui::SetWindowFontScale(UI_SCALE);
     float const iconHeight = LINE_SIZE.y + ITEM_SPACING.y + LINE_SIZE.y + ITEM_SPACING.y + LINE_SIZE.y;
     ImVec2 const iconSize { iconHeight, iconHeight };
     if (selection)
@@ -3267,28 +4083,66 @@ void Handler::RenderArcDPSGear(Time const& delta)
         bool const legendary = std::holds_alternative<legendary_t>(*selection);
         legendary_t const& base = legendary ? std::get<legendary_t>(*selection) : std::get<gear_t>(*selection);
 
+        auto const& iconSet = [this]() -> ItemStatsIconsInfo const&
+        {
+            if (auto const itr = util::find_if(iconSets, util::member_equals(&ItemStatsIconsInfo::Name, m_config.GearIconSet)))
+                return *itr;
+            return iconSets.front();
+        }();
+        ImVec2 const iconSizeOverlay { std::min<float>(iconSize.x, iconSet.IconWidth * UI_SCALE), std::min<float>(iconSize.y, iconSet.IconHeight * UI_SCALE) };
+
         API::Instance().PreloadAllGearInfos(base);
 
         for (auto const& slot : GW2::GetSlotInfos())
         {
             auto const& item = base.Items[(size_t)slot.Slot];
 
-            if (!item.Item)
             {
                 auto const& icon = GetIcon(slot.Slot);
                 ImGui::Image(icon.Texture, iconSize, icon.GetUV0(), icon.GetUV1());
-                continue;
             }
+            if (!item.Item)
+                continue;
 
             {
                 auto const& info = API::Item::Get(item.Item);
-                ImGui::Image(info.Icon.Texture, iconSize);
+                if (iconSet.Items)
+                {
+                    ImGui::SameLine(0.001f);
+                    ImGui::Image(info.Icon.Texture, iconSize);
+                }
+                if (auto const icon = iconSet.GetIcon(item.Stats))
+                {
+                    ImGui::StoreCursor();
+                    ImGui::SameLine(0.001f);
+                    ImGui::SetCursorPos(ImGui::GetCursorPos() + (iconSize - iconSizeOverlay));
+                    ImGui::Image(icon->Texture, iconSizeOverlay, icon->GetUV0(), icon->GetUV1());
+                    ImGui::RestoreCursor();
+                }
+                if (!legendary)
+                {
+                    if (auto const visibility = std::get<gear_t>(*selection).GetSlotVisibility(slot.Slot))
+                    {
+                        auto const& icon = GetIcon(*visibility ? Icons::CheckBoxChecked : Icons::CheckBoxUnchecked);
+                        ImGui::StoreCursor();
+                        ImGui::SameLine(0.001f);
+                        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6 + (iconSize.x - icon.TrimmedSize().x));
+                        ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 6);
+                        ImGui::Image(icon.Texture, icon.TrimmedSize(), icon.GetUV0(), icon.GetUV1());
+                        ImGui::RestoreCursor();
+                    }
+                }
                 ImGui::SameLine();
                 ImGui::BeginGroup();
                 if (item.Stats)
                 {
                     ImGui::Text("%s ", API::ItemStats::Get(item.Stats).Name.c_str());
                     ImGui::SameLine(0, 0);
+                }
+                if (!iconSet.Items)
+                {
+                    ImGui::Image(info.Icon.Texture, { LINE_SIZE.y, LINE_SIZE.y });
+                    ImGui::SameLine();
                 }
                 ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(GW2::GetRarityInfo(info.Rarity).Color), "%s", info.Name.c_str());
             }
@@ -3324,6 +4178,32 @@ void Handler::RenderArcDPSGear(Time const& delta)
         }
     }
     ImGui::EndChild();
+
+    if (iconSets.size() > 1)
+    {
+        static std::string const DEFAULT_NAME = "Default";
+        static uint32_t width = []
+        {
+            uint32_t result = 0;
+            for (auto const& info : iconSets)
+                result = std::max<uint32_t>(width, (uint32_t)ImGui::CalcTextSize((!info.Name.empty() ? info.Name : DEFAULT_NAME).c_str()).x);
+            return result;
+        }();
+
+        ImGui::ItemSize({ 0, 0 }, FRAME_PADDING.y);
+        ImGui::SameLine(WINDOW_PADDING.x, 0);
+        ImGui::Text("Display as:");
+        ImGui::SameLine();
+        ImGui::PushItemWidth(FRAME_PADDING.x + width + FRAME_PADDING.x + (FRAME_PADDING.x + ImGui::GetFontSize() + FRAME_PADDING.x));
+        if (int iconSet = (int)util::distance_if(iconSets, util::member_equals(&ItemStatsIconsInfo::Name, m_config.GearIconSet));
+            ImGui::Combo("", &iconSet, [](void* data, int const index, char const** text) { auto itr = iconSets.begin(); std::advance(itr, index); return *text = (!itr->Name.empty() ? itr->Name : DEFAULT_NAME).c_str(), true; }, nullptr, (int)iconSets.size()))
+        {
+            auto itr = iconSets.begin();
+            std::advance(itr, iconSet);
+            m_config.GearIconSet = itr->Name;
+        }
+        ImGui::PopItemWidth();
+    }
     ImGui::Columns(1);
 }
 
@@ -3376,21 +4256,16 @@ void Handler::VersionUpdate()
         return;
 
     fs::path const downloadPath = fmt::format("./bin64/d3d9_arcdps_buildpad_{}.dll", m_versionLatest.Version);
-    fs::path const versionPath = "./addons/arcdps/arcdps.buildpad/version";
 
     m_versionUpdateState = VersionUpdateState::Downloading;
-    Web::Instance().Request(m_versionLatest.URL, [this, downloadPath, versionPath](std::string_view const data)
+    Web::Instance().Request(m_versionLatest.URL, [this, downloadPath](std::string_view const data)
     {
         if (data.empty() || data[0] != 0x4D)
             throw std::exception("Failed to download DLL");
 
         create_directories(downloadPath.parent_path());
-        create_directories(versionPath.parent_path());
 
         std::ofstream { downloadPath, std::ofstream::out | std::ofstream::binary | std::ofstream::trunc } << data;
-
-        m_versionUpdateState = VersionUpdateState::Manifesting;
-        std::ofstream { versionPath, std::ofstream::out | std::ofstream::trunc } << m_versionLatest.Version;
 
         m_versionUpdateState = VersionUpdateState::Done;
     }, [this](std::exception const& e)
@@ -3402,15 +4277,17 @@ void Handler::VersionUpdate()
 
 void Handler::RenderVersionHistory(bool all)
 {
-    ImGui::SetNextWindowSizeConstraints({ 400, 300 }, { 10000, 10000 });
+    ImGui::SetNextWindowSizeConstraints({ 400px, 300px }, { 10000px, 10000px });
     ImGui::SetNextWindowPosCenter(ImGuiSetCond_Appearing);
     ImGui::Begin("BuildPad##VersionHistory", &m_versionHistoryShown, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::SetWindowFontScale(UI_SCALE);
     if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(VK_ESCAPE, false))
     {
         m_versionHistoryShown = false;
         ImGui::CaptureKeyboardFromApp();
     }
     ImGui::BeginChild("Version History", { 0, -ITEM_SPACING.y - LINE_SIZE.y - FRAME_PADDING.y * 2 });
+    ImGui::SetWindowFontScale(UI_SCALE);
     for (auto itr = m_versionHistory.rbegin(); itr != m_versionHistory.rend(); ++itr)
     {
         auto const& info = itr->second;
@@ -3442,9 +4319,10 @@ void Handler::RenderVersionHistory(bool all)
 
 void Handler::RenderAbout()
 {
-    ImGui::SetNextWindowSizeConstraints({ 400, 300 }, { 10000, 10000 });
+    ImGui::SetNextWindowSizeConstraints({ 400px, 300px }, { 10000px, 10000px });
     ImGui::SetNextWindowPosCenter(ImGuiSetCond_Appearing);
     ImGui::Begin("BuildPad##About", &m_aboutShown, ImGuiWindowFlags_NoSavedSettings);
+    ImGui::SetWindowFontScale(UI_SCALE);
     if (ImGui::IsWindowFocused() && ImGui::IsKeyPressed(VK_ESCAPE, false))
     {
         m_aboutShown = false;
@@ -3472,6 +4350,7 @@ void Handler::RenderAbout()
     }
 
     ImGui::BeginChild("Credits");
+    ImGui::SetWindowFontScale(UI_SCALE);
     static struct
     {
         std::string Name;
@@ -3545,7 +4424,7 @@ std::tuple<std::vector<char>, uint32_t, uint32_t> Handler::LoadImageFile(std::va
 #undef CHECK
 }
 
-std::optional<TextureData> Handler::LoadTexture(std::variant<fs::path, std::pair<char const*, size_t>>&& source) const
+std::optional<TextureData> Handler::LoadTexture(std::variant<fs::path, std::pair<char const*, size_t>>&& source)
 {
     try
     {
@@ -3565,151 +4444,20 @@ std::optional<TextureData> Handler::LoadTexture(std::variant<fs::path, std::pair
         memcpy(rect.pBits, data.data(), sizeof(char) * width * height * 4);
         texture->UnlockRect(0);
 
+        m_loadedTextures.push_back(texture);
+
         return TextureData { texture, width, height };
     }
     catch (...) { return { }; }
 }
 
-bool Handler::KeyBind::IsPressed() const
+void Handler::UnloadTexture(TextureID const& texture)
 {
-    return Key
-        && Control == ImGui::GetIO().KeyCtrl
-        && Alt == ImGui::GetIO().KeyAlt
-        && Shift == ImGui::GetIO().KeyShift
-        && ImGui::IsKeyPressed(Key, false);
-}
-
-bool Handler::KeyBind::FromString(std::string_view str)
-{
-    Control = Alt = Shift = false;
-    Key = 0;
-    for (auto&& part : util::split(str, "+"))
+    if (texture)
     {
-        if (part.empty())
-            return false;
-
-        if (part == "CTRL")
-            Control = true;
-        else if (part == "ALT")
-            Alt = true;
-        else if (part == "SHIFT")
-            Shift = true;
-        else if (auto itr = std::find_if(GetKeyMap().begin(), GetKeyMap().end(), [&part](auto const& pair) { return part == pair.second; }); itr != GetKeyMap().end())
-            Key = itr->first;
-        else if (part[0] >= '0' && part[0] <= '9' || part[0] >= 'A' && part[0] <= 'Z')
-            Key = part[0];
-        else
-            return false;
+        texture->Release();
+        m_loadedTextures.remove(texture);
     }
-    return Key;
-}
-
-std::optional<std::string> Handler::KeyBind::ToString() const
-{
-    if (auto key = KeyToString(Key))
-        return fmt::format("{}{}{}{}",
-            Control ? "CTRL+" : "",
-            Alt ? "ALT+" : "",
-            Shift ? "SHIFT+" : "",
-            *key);
-
-    return { };
-}
-
-std::optional<std::string> Handler::KeyBind::KeyToString(key_t key)
-{
-    if (!key)
-        return { };
-
-    if (key >= '0' && key <= '9' || key >= 'A' && key <= 'Z')
-        return std::string(1, key);
-
-    if (auto const itr = GetKeyMap().find(key); itr != GetKeyMap().end())
-        return std::string(itr->second);
-
-    return { };
-}
-
-std::map<Handler::KeyBind::key_t, std::string_view> const& Handler::KeyBind::GetKeyMap()
-{
-    static std::map<key_t, std::string_view> const instance
-    {
-        { VK_BACK,          "BACK"      },
-        { VK_TAB,           "TAB"       },
-        { VK_CLEAR,         "CLEAR"     },
-        { VK_RETURN,        "RETURN"    },
-        { VK_ESCAPE,        "ESCAPE"    },
-        { VK_SPACE,         "SPACE"     },
-        { VK_PRIOR,         "PGUP"      },
-        { VK_NEXT,          "PGDN"      },
-        { VK_END,           "END"       },
-        { VK_HOME,          "HOME"      },
-        { VK_LEFT,          "LEFT"      },
-        { VK_UP,            "UP"        },
-        { VK_RIGHT,         "RIGHT"     },
-        { VK_DOWN,          "DOWN"      },
-        { VK_SELECT,        "SELECT"    },
-        { VK_PRINT,         "PRINT"     },
-        { VK_EXECUTE,       "EXECUTE"   },
-        { VK_SNAPSHOT,      "SNAPSHOT"  },
-        { VK_INSERT,        "INSERT"    },
-        { VK_DELETE,        "DELETE"    },
-        { VK_HELP,          "HELP"      },
-        { VK_NUMPAD0,       "NUMPAD0"   },
-        { VK_NUMPAD1,       "NUMPAD1"   },
-        { VK_NUMPAD2,       "NUMPAD2"   },
-        { VK_NUMPAD3,       "NUMPAD3"   },
-        { VK_NUMPAD4,       "NUMPAD4"   },
-        { VK_NUMPAD5,       "NUMPAD5"   },
-        { VK_NUMPAD6,       "NUMPAD6"   },
-        { VK_NUMPAD7,       "NUMPAD7"   },
-        { VK_NUMPAD8,       "NUMPAD8"   },
-        { VK_NUMPAD9,       "NUMPAD9"   },
-        { VK_MULTIPLY,      "MULTIPLY"  },
-        { VK_ADD,           "ADD"       },
-        { VK_SEPARATOR,     "SEPARATOR" },
-        { VK_SUBTRACT,      "SUBTRACT"  },
-        { VK_DECIMAL,       "DECIMAL"   },
-        { VK_DIVIDE,        "DIVIDE"    },
-        { VK_F1,            "F1"        },
-        { VK_F2,            "F2"        },
-        { VK_F3,            "F3"        },
-        { VK_F4,            "F4"        },
-        { VK_F5,            "F5"        },
-        { VK_F6,            "F6"        },
-        { VK_F7,            "F7"        },
-        { VK_F8,            "F8"        },
-        { VK_F9,            "F9"        },
-        { VK_F10,           "F10"       },
-        { VK_F11,           "F11"       },
-        { VK_F12,           "F12"       },
-        { VK_F13,           "F13"       },
-        { VK_F14,           "F14"       },
-        { VK_F15,           "F15"       },
-        { VK_F16,           "F16"       },
-        { VK_F17,           "F17"       },
-        { VK_F18,           "F18"       },
-        { VK_F19,           "F19"       },
-        { VK_F20,           "F20"       },
-        { VK_F21,           "F21"       },
-        { VK_F22,           "F22"       },
-        { VK_F23,           "F23"       },
-        { VK_F24,           "F24"       },
-        { VK_NUMLOCK,       "NUMLOCK"   },
-        { VK_SCROLL,        "SCROLL"    },
-        { VK_OEM_1,         ";"         },
-        { VK_OEM_PLUS,      "="         },
-        { VK_OEM_COMMA,     ","         },
-        { VK_OEM_MINUS,     "-"         },
-        { VK_OEM_PERIOD,    "."         },
-        { VK_OEM_2,         "/"         },
-        { VK_OEM_3,         "`"         },
-        { VK_OEM_4,         "["         },
-        { VK_OEM_5,         "\\"        },
-        { VK_OEM_6,         "]"         },
-        { VK_OEM_7,         "'"        },
-    };
-    return instance;
 }
 
 }

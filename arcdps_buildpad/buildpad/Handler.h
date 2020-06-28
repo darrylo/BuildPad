@@ -4,6 +4,7 @@
 #include "Build.h"
 #include "MumbleLink.h"
 #include "ChatLink.h"
+#include "KeyBind.h"
 #include <d3d9.h>
 
 namespace buildpad
@@ -22,6 +23,7 @@ public:
     void LoadConfig();
     void SaveConfig();
     void LoadTest();
+    void Unload();
 
     bool HandleKeyBinds();
     void Update();
@@ -51,6 +53,7 @@ public:
         CancelBuildEdit,
         ClearSearch,
         Settings,
+        MissingProfession,
         MissingSkill,
         LandSkills,
         WaterSkills,
@@ -70,66 +73,30 @@ public:
         LoadingPet,
         ErrorPet,
         SelectionChevron,
+        CheckBoxUnchecked,
+        CheckBoxChecked,
     };
     template<typename Key>
     [[nodiscard]] TextureData const& GetIcon(Key key) const { return GetIconContainer<Key>().at(key); }
-    [[nodiscard]] std::optional<TextureData> LoadTexture(std::variant<fs::path, std::pair<char const*, size_t>>&& source) const;
+    [[nodiscard]] std::optional<TextureData> LoadTexture(std::variant<fs::path, std::pair<char const*, size_t>>&& source);
+    void UnloadTexture(TextureData& texture) { UnloadTexture(std::exchange(texture.Texture, TextureID { })); }
+    void UnloadTexture(TextureID const& texture);
 
-    [[nodiscard]] uint32_t SkillPaletteToSkill(uint32_t palette, GW2::RevenantLegend legend) const
-    {
-        if (auto const index = GW2::RevenantLegendInfo::GetSkillIndex(palette))
-            return GW2::GetRevenantLegendInfo(legend).Skills[*index];
-
-        auto const itr = m_palettes.find(palette);
-        return itr != m_palettes.end() ? itr->second.front() : 0;
-    }
-    [[nodiscard]] GW2::Specialization GetPaletteSpecialization(uint32_t palette, GW2::RevenantLegend legend) const
-    {
-        auto const itr = m_skills.find(SkillPaletteToSkill(palette, legend));
-        return itr != m_skills.end() ? itr->second.Specialization : GW2::Specialization::None;
-    }
-
+    [[nodiscard]] bool ArePetsLoaded() const { return m_petsLoaded; }
     [[nodiscard]] std::vector<uint32_t> const& GetPets() const { return m_petIDs; }
+
+    [[nodiscard]] float GetUIScale() const { return m_config.UIScale / 100.0f; }
+    [[nodiscard]] bool IsLessTransparentButtonsEnabled() const { return m_config.LessTransparentButtons; }
 
 private:
     bool m_loaded = false;
     IDirect3DDevice9* m_d3dDevice = nullptr;
-    struct KeyBind
-    {
-        using key_t = uint8_t;
-
-        bool Control = false;
-        bool Alt = false;
-        bool Shift = false;
-        key_t Key { };
-
-        bool IsPressed() const;
-        bool FromString(std::string_view str);
-        std::optional<std::string> ToString() const;
-        static std::optional<std::string> KeyToString(key_t key);
-        static std::map<key_t, std::string_view> const& GetKeyMap();
-    } m_keyBindToggleBuilds, m_keyBindEdited;
+    KeyBind m_keyBindToggleBuilds;
     using Clock = std::chrono::high_resolution_clock;
     Clock::time_point m_previousUpdate { };
+    std::list<TextureID> m_loadedTextures;
 
-    struct Skill
-    {
-        enum class SkillType : uint8_t
-        {
-            None,
-            Profession,
-            Heal,
-            Utility,
-            Elite,
-        };
-        uint32_t ID = 0;
-        SkillType Type = SkillType::None;
-        GW2::Specialization Specialization = GW2::Specialization::None;
-        std::vector<uint32_t> Palettes;
-        std::string Name;
-    };
-    std::unordered_map<uint32_t, Skill> m_skills;
-    std::unordered_map<uint32_t, std::vector<uint32_t>> m_palettes;
+    std::future<void> m_skillLoading;
 
     struct Pet
     {
@@ -164,10 +131,88 @@ private:
     void RenderSettings(bool menu);
     bool m_detachSettings = false;
 
+    using KeyBindCallback = std::function<void(KeyBind const&)>;
+    void EditKeyBind(KeyBind const& keyBind, KeyBindCallback&& callback);
+    void RenderKeyBindEditor();
+    bool m_keyBindEditing = false;
+    KeyBind m_keyBindEdited;
+    KeyBindCallback m_keyBindCallback;
+
     void BeginRenderBuildList(GW2::Profession profession, bool& firstVisible, bool& firstSorted, bool singleProfession, GW2::Profession professionColor, float colorMultiplier = 1.0f) const;
     void EndRenderBuildList(bool singleProfession) const;
 
-    void RenderBuildTooltip(Build const& build, bool footer = true, bool errorMissing = false, Build* editTarget = nullptr) const;
+    void RenderBuildTooltip(Build const& build, bool footer = true, bool errorMissing = false, Build* editTarget = nullptr, bool allowChangeProfession = false) const;
+
+    template<typename DataType, typename InfoType, typename InfoSourceType, typename APIType>
+    struct PaletteContext
+    {
+        Build* EditTarget;
+        std::string Context;
+
+        std::function<void()> Preload;
+
+        std::function<DataType(bool water, uint8_t index)> Getter;
+        std::function<void(ChatLink::BuildTemplate& data, bool water, uint8_t index, DataType selection)> Setter;
+
+        bool PaletteSourceLoaded;
+        InfoSourceType const& PaletteSource;
+        std::function<bool(InfoType const& info, bool water, uint8_t index)> PaletteFilter;
+        std::function<bool(InfoType const& info, bool water, uint8_t index)> PaletteActive;
+        std::function<bool(InfoType const& info, bool water, uint8_t index)> PaletteUsable;
+        std::function<bool(InfoType const* a, InfoType const* b)> PaletteSorter;
+
+        Icons MissingAPIIcon;
+        std::string APIType::*APIName;
+        TextureData APIType::*APIIcon;
+        std::function<TextureData const&(DataType const& selection, bool palette)> IconGetter;
+        std::function<DataType(InfoType const& info)> InfoToDataTransform;
+        std::function<uint32_t(DataType const& selection, bool water, uint8_t index)> DataToAPITransform;
+
+        bool Water;
+        bool DarkenFirstHalf = false;
+        bool DarkenSecondHalf = false;
+        ImVec2 TypeSize;
+        bool BarVertical;
+        float BarSpacing;
+        uint8_t BarButtonCount;
+        uint8_t BarButtonPerRow = 0;
+        ImVec2 ButtonSize;
+        float ButtonSpacing;
+        ImVec2 PaletteSize;
+        ImVec2 PaletteSpacing;
+        uint8_t PalettePerRow;
+        bool PaletteReverse = false;
+
+        std::string ButtonTooltip;
+
+        PaletteContext(std::string_view context, InfoSourceType const& paletteSource, std::string APIType::*apiName, TextureData APIType::*apiIcon) : Context(context), PaletteSource(paletteSource), APIName(apiName), APIIcon(apiIcon) { }
+    };
+    template<typename DataType, typename InfoType, typename InfoSourceType, typename APIType>
+    void RenderPaletteBar(PaletteContext<DataType, InfoType, InfoSourceType, APIType> const& context) const;
+
+    struct BuildEditContext
+    {
+        static inline uint32_t NextWindowID = 0;
+        uint32_t WindowID = NextWindowID++;
+
+        Build::id_t ID;
+        Build Original;
+        Build TemporaryEditTarget;
+        bool BuildStorageEditedBuild = false;
+        bool Closed = false;
+
+        bool IsChanged();
+        void RevertChanges();
+        Build const& GetOriginal();
+        Build& GetEditTarget();
+
+        BuildEditContext(Build const& build, bool buildStorageEditedBuild) : ID(build.GetID()), Original(build), TemporaryEditTarget(build), BuildStorageEditedBuild(buildStorageEditedBuild) { }
+    };
+    std::list<BuildEditContext> m_editedBuilds;
+    void RenderBuildEditor(BuildEditContext& context) const;
+    void RenderBuildEditors();
+    void CloseBuildEditor(Build const& build) { m_editedBuilds.remove_if(util::member_equals(&BuildEditContext::ID, build.GetID())); }
+    void OpenBuildEditor(Build const& build, bool buildStorageEditedBuild) { CloseBuildEditor(build); m_editedBuilds.emplace_back(build, buildStorageEditedBuild); }
 
     void RenderArcDPSMigration(Time const& delta);
     std::future<void> m_arcdpsMigrationDiscovery;
@@ -205,7 +250,6 @@ private:
     {
         Idle,
         Downloading,
-        Manifesting,
         Done,
         Error,
     } m_versionUpdateState = VersionUpdateState::Idle;
@@ -225,6 +269,7 @@ private:
     // Config
     struct Config
     {
+        std::string LastLaunchedVersion;
         std::string SkipUpdateVersion;
         bool ArcDPSMigrationHintHidden = false;
         std::string KeyBindToggleBuilds = "ALT+SHIFT+D";
@@ -234,6 +279,9 @@ private:
         bool ShowNameFilter = true;
         bool ShowFlagsFilter = true;
         bool ShowSettingsButton = true;
+        bool SimpleFlagsFilter = false;
+        bool ClearFiltersOnWindowClose = false;
+        bool LessTransparentButtons = false;
         uint32_t HideFlagsMask = 0;
         bool HiddenFiltersHintHidden = false;
         bool UseProfessionColors = true;
@@ -261,6 +309,7 @@ private:
         bool SortBuildsAlphabetically = false;
         bool AllowBuildReordering = true;
         uint32_t TooltipDelay = 500;
+        uint32_t UIScale = 100;
         bool LockWindowPosition = false;
         int32_t WindowPositionX = 0;
         int32_t WindowPositionY = 0;
@@ -268,7 +317,10 @@ private:
         uint32_t WindowSizeW = 0;
         uint32_t WindowSizeH = 0;
         bool AutoWindowHeight = false;
+        bool HideWindowHeader = false;
         bool KeepWindowInBounds = true;
+        std::string GearIconSet;
+        bool Snow = true;
 
         using field_t = std::variant<bool(Config::*), uint32_t(Config::*), int32_t(Config::*), std::string(Config::*), std::array<uint32_t, 10>(Config::*)>;
         [[nodiscard]] static std::vector<std::pair<std::string, field_t>> const& GetFields()
@@ -276,6 +328,7 @@ private:
 #define FIELD(name) { #name, &Config::##name }
             static std::vector<std::pair<std::string, field_t>> const instance
             {
+                FIELD(LastLaunchedVersion),
                 FIELD(SkipUpdateVersion),
                 FIELD(ArcDPSMigrationHintHidden),
                 FIELD(KeyBindToggleBuilds),
@@ -285,6 +338,9 @@ private:
                 FIELD(ShowNameFilter),
                 FIELD(ShowFlagsFilter),
                 FIELD(ShowSettingsButton),
+                FIELD(SimpleFlagsFilter),
+                FIELD(ClearFiltersOnWindowClose),
+                FIELD(LessTransparentButtons),
                 FIELD(HideFlagsMask),
                 FIELD(HiddenFiltersHintHidden),
                 FIELD(UseProfessionColors),
@@ -298,6 +354,7 @@ private:
                 FIELD(SortBuildsAlphabetically),
                 FIELD(AllowBuildReordering),
                 FIELD(TooltipDelay),
+                FIELD(UIScale),
                 FIELD(LockWindowPosition),
                 FIELD(WindowPositionX),
                 FIELD(WindowPositionY),
@@ -305,7 +362,10 @@ private:
                 FIELD(WindowSizeW),
                 FIELD(WindowSizeH),
                 FIELD(AutoWindowHeight),
+                FIELD(HideWindowHeader),
                 FIELD(KeepWindowInBounds),
+                FIELD(GearIconSet),
+                FIELD(Snow),
             };
 #undef FIELD
             return instance;
